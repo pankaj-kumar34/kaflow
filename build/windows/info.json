@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.1.0"
+	},
+	"info": {
+		"0409": {
+			"ProductVersion": "0.1.0",
+			"CompanyName": "Kaflow",
+			"FileDescription": "Native Desktop Client for Redis, Valkey & In-Memory Databases",
+			"LegalCopyright": "© 2026, Kaflow",
+			"ProductName": "Kaflow",
+			"Comments": "This is a comment"
+		}
+	}
+}

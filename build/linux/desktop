@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Kaflow
+Comment=Native Desktop Client for Redis, Valkey & In-Memory Databases
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/kaflow %u
+Terminal=false
+Type=Application
+Icon=kaflow
+Categories=Utility;Development;
+StartupWMClass=kaflow
+
+ 
