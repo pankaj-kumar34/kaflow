@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #fafafa;
+  color: #18181b;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Form controls normalization for macOS WebKit */
+input:not([type="checkbox"]):not([type="radio"]), textarea, select {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  line-height: normal;
+  font-family: inherit;
+}
+
+input[type="checkbox"], input[type="radio"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  accent-color: #dc2626;
+  cursor: pointer;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+input, button, textarea, select, a {
+  --wails-draggable: no-drag;
+}
+
+/* Subtle Modern Scrollbars */
+*, *::before, *::after, textarea, pre, code {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(161, 161, 170, 0.4) transparent;
+}
+
+::-webkit-scrollbar,
+*::-webkit-scrollbar,
+textarea::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track,
+textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-thumb,
+textarea::-webkit-scrollbar-thumb {
+  background: rgba(161, 161, 170, 0.4);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:hover,
+textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.6);
+}
+
+::-webkit-scrollbar-corner,
+*::-webkit-scrollbar-corner,
+textarea::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Utility to completely hide scrollbar where desired */
+.no-scrollbar,
+.scrollbar-none {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Code and pre elements inherit clean system font */
+code, pre {
+  font-family: inherit;
+}
+
+/* Sidebar Boot & Shutdown Animation */
+.sidebar-boot-container {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 260ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 200ms ease,
+              border-color 200ms ease;
+}
+
+.sidebar-boot-container.shutdown {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  border-color: transparent !important;
+  pointer-events: none;
+}
+
+.sidebar-boot-inner {
+  overflow: hidden;
+}
+
+.sidebar-boot-item {
+  transform: translateY(0);
+  opacity: 1;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 200ms ease;
+}
+
+.sidebar-boot-container.shutdown .sidebar-boot-item {
+  transform: translateY(-8px);
+  opacity: 0;
+}
+
+.sidebar-boot-item:nth-child(1) { transition-delay: 20ms; }
+.sidebar-boot-item:nth-child(2) { transition-delay: 50ms; }
+.sidebar-boot-item:nth-child(3) { transition-delay: 80ms; }
+.sidebar-boot-item:nth-child(4) { transition-delay: 110ms; }
+
+/* Mini rail collapsed boot animation */
+.sidebar-rail-boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-height: 200px;
+  opacity: 1;
+  transform: scaleY(1);
+  transform-origin: top;
+  transition: max-height 260ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 200ms ease,
+              margin 200ms ease;
+  overflow: hidden;
+}
+
+.sidebar-rail-boot.shutdown {
+  max-height: 0px;
+  opacity: 0;
+  margin: 0 !important;
+  pointer-events: none;
+}
+
+/* Sidebar Connection Item Promoting Animation */
+.connection-item-moving-up {
+  z-index: 30 !important;
+  box-shadow: 0 14px 28px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.15) !important;
+  filter: brightness(1.08);
+  will-change: transform;
+}
+
+/* Enter Animations */
+@keyframes enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+      scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), var(--tw-enter-scale, 1));
+  }
+}
+
+@utility animate-in {
+  animation-name: enter;
+  animation-duration: 150ms;
+  --tw-enter-opacity: initial;
+  --tw-enter-scale: initial;
+  --tw-enter-translate-x: initial;
+  --tw-enter-translate-y: initial;
+}
+
+@utility fade-in {
+  --tw-enter-opacity: 0;
+}
+
+@utility scale-in-95 {
+  --tw-enter-scale: 0.95;
+}
+
+@utility slide-in-from-bottom-2 {
+  --tw-enter-translate-y: 0.5rem;
+}
+
