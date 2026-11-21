@@ -57,11 +57,15 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
                 : "bg-red-100 text-red-600"
             }`}
           >
-            {variant === "danger" ? <Trash2 size={20} /> : <AlertTriangle size={20} />}
+            {variant === "danger" ? (
+              <Trash2 size={20} />
+            ) : (
+              <AlertTriangle size={20} />
+            )}
           </div>
 
           <div className="min-w-0 flex-1 pt-0.5">
-            <h3 className="text-base leading-tight font-bold text-zinc-900">
+            <h3 className="text-base leading-tight font-bold text-mauve-900">
               {title}
             </h3>
             <p className="mt-1.5 text-xs leading-relaxed text-zinc-600">
@@ -71,7 +75,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
           <button
             onClick={onCancel}
-            className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+            className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-mauve-100 hover:text-zinc-700"
             title="Close (Esc)"
           >
             <X size={15} />
@@ -84,7 +88,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
             variant="outline"
             size="sm"
             onClick={onCancel}
-            className="h-9 cursor-pointer border-zinc-200 bg-white px-4 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+            className="h-9 cursor-pointer border-zinc-200 bg-white px-4 text-xs font-semibold text-zinc-700 hover:bg-mauve-100"
           >
             {cancelText}
           </Button>

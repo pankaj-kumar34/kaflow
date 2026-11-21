@@ -12,7 +12,7 @@
         <key>CFBundleVersion</key>
             <string>1.0.0</string>
         <key>CFBundleGetInfoString</key>
-            <string>Native Desktop Client for Redis, Valkey &amp; In-Memory Databases</string>
+            <string>Native Desktop Client for Apache Kafka</string>
         <key>CFBundleShortVersionString</key>
             <string>1.0.0</string>
         <key>CFBundleIconFile</key>

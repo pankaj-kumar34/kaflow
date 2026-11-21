@@ -135,7 +135,7 @@ export const ValueDetailModal: React.FC<ValueDetailModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-zinc-50/70 px-5">
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-mauve-50/70 px-5">
           <div className="flex min-w-0 items-center gap-2.5">
             {isJson && (
               <span className="shrink-0 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 uppercase">
@@ -143,16 +143,21 @@ export const ValueDetailModal: React.FC<ValueDetailModalProps> = ({
               </span>
             )}
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold text-zinc-900">{title}</h3>
+              <h3 className="truncate text-sm font-semibold text-mauve-900">
+                {title}
+              </h3>
               {subtitle && (
-                <p className="truncate font-mono text-[11px] text-zinc-500">{subtitle}</p>
+                <p className="truncate font-mono text-[11px] text-zinc-500">
+                  {subtitle}
+                </p>
               )}
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <span className="hidden font-mono text-[11px] text-zinc-400 sm:inline">
-              {currentValue.length} chars ({new Blob([currentValue]).size} bytes)
+              {currentValue.length} chars ({new Blob([currentValue]).size}{" "}
+              bytes)
             </span>
             <Button
               variant="ghost"
@@ -171,14 +176,14 @@ export const ValueDetailModal: React.FC<ValueDetailModalProps> = ({
           <div className="flex items-center gap-2">
             {/* View Mode Toggle: Only shown when content is JSON */}
             {isJson && (
-              <div className="flex items-center rounded-lg border border-zinc-200 bg-zinc-100 p-0.5 shadow-2xs">
+              <div className="flex items-center rounded-lg border border-zinc-200 bg-mauve-100 p-0.5 shadow-2xs">
                 <button
                   type="button"
                   onClick={() => setViewMode("code")}
                   className={`flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
                     viewMode === "code"
-                      ? "bg-white text-zinc-900 shadow-2xs"
-                      : "text-zinc-500 hover:text-zinc-800"
+                      ? "bg-white text-mauve-900 shadow-2xs"
+                      : "text-zinc-500 hover:text-mauve-800"
                   }`}
                 >
                   <Code size={12} />
@@ -190,8 +195,8 @@ export const ValueDetailModal: React.FC<ValueDetailModalProps> = ({
                   onClick={() => setViewMode("tree")}
                   className={`flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
                     viewMode === "tree"
-                      ? "bg-white text-zinc-900 shadow-2xs"
-                      : "text-zinc-500 hover:text-zinc-800"
+                      ? "bg-white text-mauve-900 shadow-2xs"
+                      : "text-zinc-500 hover:text-mauve-800"
                   }`}
                 >
                   <FolderTree size={12} />
@@ -227,8 +232,18 @@ export const ValueDetailModal: React.FC<ValueDetailModalProps> = ({
               className="h-7 shrink-0 cursor-pointer gap-1.5 px-3 text-xs font-semibold"
               title={`Save Changes (${modSymbol}S)`}
             >
-              {savedSuccess ? <Check size={13} className="text-white" /> : <Save size={13} />}
-              <span>{savedSuccess ? "Saved!" : saving ? "Saving..." : `Save (${modSymbol}S)`}</span>
+              {savedSuccess ? (
+                <Check size={13} className="text-white" />
+              ) : (
+                <Save size={13} />
+              )}
+              <span>
+                {savedSuccess
+                  ? "Saved!"
+                  : saving
+                    ? "Saving..."
+                    : `Save (${modSymbol}S)`}
+              </span>
             </Button>
           )}
         </div>
@@ -248,7 +263,7 @@ export const ValueDetailModal: React.FC<ValueDetailModalProps> = ({
               />
 
               {/* Status Footer */}
-              <div className="flex h-7 shrink-0 items-center justify-between border-t border-zinc-200 bg-zinc-50 px-3 text-[11px] select-none">
+              <div className="flex h-7 shrink-0 items-center justify-between border-t border-zinc-200 bg-mauve-50 px-3 text-[11px] select-none">
                 <div className="flex items-center gap-2">
                   {isJson ? (
                     <span className="flex items-center gap-1 font-sans font-medium text-emerald-700">

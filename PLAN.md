@@ -1,35 +1,31 @@
 # Kaflow: Native Apache Kafka Desktop Client (Wails v3)
 
-Kaflow is the Apache Kafka sibling of [kaflow](https://github.com/pankaj-kumar34/kaflow) (Redis/Valkey client). Same native-first architecture and frontend design language, red accent theme. Built with **Wails v3**, **Go**, and **React 19 + TypeScript + Tailwind CSS v4**.
+Kaflow is a native-first Apache Kafka desktop client built with **Wails v3**, **Go**, and **React 19 + TypeScript + Tailwind CSS v4**. Feature-level scope lives in [FEATURES.md](FEATURES.md).
 
 ## Current State
 
-The codebase was forked from kaflow and fully rebranded (module `kaflow`, `~/.kaflow` storage, `kaflow` keyring service, red `#dc2626` accent, regenerated bindings). **The backend service layer still speaks Redis (`go-redis`)** — the work below migrates it to Kafka.
+Kaflow's Go backend speaks Apache Kafka via [`github.com/twmb/franz-go`](https://github.com/twmb/franz-go) and `franz-go/pkg/kadm`, with `~/.kaflow` profile storage, OS keyring secrets, and a 3-tab React workspace (**Topics**, **Groups**, **Cluster**).
 
-## Migration Roadmap
+## Roadmap
 
-### Phase 1 — Kafka Backend (replaces go-redis)
+### Phase 1 — Kafka Backend
 
-- [ ] Add [`github.com/twmb/franz-go`](https://github.com/twmb/franz-go) (+ `franz-go/pkg/kadm` for admin ops); remove `go-redis`, `miniredis`
-- [ ] `backend/connection`: broker connection manager — seed brokers, TLS/mTLS, SASL (PLAIN/SCRAM/OAUTHBEARER), SSH tunnel reuse; connection health check (`Metadata`)
-- [ ] `backend/services/connection_service.go`: test/save/list profiles (keep models, keyring, env badges, read-only flag)
-- [ ] Topic service: list/describe topics, partition leaders + ISR, configs, create/alter/increase-partitions, delete (read-only guarded)
-- [ ] Consumer group service: list groups, describe (members/offsets), lag computation, offset reset to earliest/latest/timestamp
-- [ ] Message service: tail/fetch records per topic-partition (key/value/headers/timestamp), bounded fetches like kaflow's SCAN, produce records
-- [ ] Console service: admin operation console with tokenization, history, latency metrics
-- [ ] Diagnostics service: broker/cluster metrics (controller id, topic count, under-replicated partitions)
-- [ ] PubSub service → live message tail event stream (`kaflow:message` events)
-- [ ] Tests: swap `miniredis` for a containerized/local Kafka or `franz-go` mocks
+- [x] [`github.com/twmb/franz-go`](https://github.com/twmb/franz-go) (+ `franz-go/pkg/kadm` for admin ops)
+- [x] `backend/connection`: broker connection manager — seed brokers, TLS/mTLS, SASL (PLAIN/SCRAM/OAUTHBEARER), SSH tunnel reuse; connection health check (`Metadata`)
+- [x] `backend/services/connection_service.go`: test/save/list profiles (keyring, env badges, read-only flag)
+- [x] Topic service: list/describe topics, partition leaders + ISR, configs, create/alter/increase-partitions, delete (read-only guarded)
+- [x] Consumer group service: list groups, describe (members/offsets), lag computation, offset reset to earliest/latest/timestamp
+- [x] Message service: bounded fetches per topic-partition (key/value/headers/timestamp), produce records
+- [x] Tail service: live message tail event stream (`kaflow:message` events)
+- [x] Diagnostics service: broker/cluster metrics (controller id, topic count, under-replicated partitions)
+- [~] Tests: unit tests (manager save/load/redaction, SASL/TLS builders) pass; containerized Kafka integration tests still open
 
-### Phase 2 — Frontend Remap (same design system)
+### Phase 2 — Frontend
 
-- [ ] Key Explorer → **Topic Explorer** (tree by topic, virtualized table: partitions, replicas, configs)
-- [ ] Data-structure editors → **Message viewer/producer** (key/value/headers, JSON highlight, partition/offset meta)
-- [ ] Pub/Sub Debugger → **Consumer Groups** dashboard (lag table) + live tail
-- [ ] Monitor → broker metrics charts (existing dashboard component, new data source)
-- [ ] Terminal → admin console (commands + autocomplete from Kafka admin ops)
-- [ ] Copy pass: replace Redis wording (KEYS/TTL/DB selector) with Kafka wording (topics/partitions/replication)
-- [ ] Keep: connection profiles UI, environment badges, read-only mode, shortcuts modal, updater, toast/confirm primitives
+- [x] **Topic Explorer**: topic list, partition layout & watermarks, inline-editable configs, message browser (filter, copy, JSON export), live tail, produce
+- [x] **Consumer Groups**: group list, per-partition lag table, offset reset
+- [x] **Cluster Dashboard**: broker list, controller, under-replicated & offline partition visibility
+- [x] Connection profiles UI, environment badges, read-only mode, shortcuts modal, updater, toast/confirm primitives
 
 ### Non-Goals
 

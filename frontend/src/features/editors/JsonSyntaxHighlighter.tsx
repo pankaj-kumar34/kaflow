@@ -11,7 +11,15 @@ interface JsonSyntaxHighlighterProps {
 }
 
 interface Token {
-  type: "text" | "key" | "colon" | "string" | "number" | "boolean" | "null" | "punct";
+  type:
+    | "text"
+    | "key"
+    | "colon"
+    | "string"
+    | "number"
+    | "boolean"
+    | "null"
+    | "punct";
   val: string;
 }
 
@@ -44,7 +52,10 @@ export const JsonSyntaxHighlighter: React.FC<JsonSyntaxHighlighterProps> = ({
       const tokens: Token[] = [];
       let lastIndex = 0;
       let match: RegExpExecArray | null;
-      const tokenRegex = new RegExp(JSON_TOKEN_REGEX.source, JSON_TOKEN_REGEX.flags);
+      const tokenRegex = new RegExp(
+        JSON_TOKEN_REGEX.source,
+        JSON_TOKEN_REGEX.flags,
+      );
 
       while ((match = tokenRegex.exec(line)) !== null) {
         if (match.index > lastIndex) {
@@ -111,7 +122,7 @@ export const JsonSyntaxHighlighter: React.FC<JsonSyntaxHighlighterProps> = ({
         parts.push(
           <span key={start} className={defaultClass}>
             {text.slice(start, idx)}
-          </span>
+          </span>,
         );
       }
       parts.push(
@@ -120,7 +131,7 @@ export const JsonSyntaxHighlighter: React.FC<JsonSyntaxHighlighterProps> = ({
           className="rounded-xs bg-amber-300 px-0.5 font-bold text-amber-950"
         >
           {text.slice(idx, idx + term.length)}
-        </mark>
+        </mark>,
       );
       start = idx + term.length;
       idx = lower.indexOf(term, start);
@@ -130,7 +141,7 @@ export const JsonSyntaxHighlighter: React.FC<JsonSyntaxHighlighterProps> = ({
       parts.push(
         <span key={start} className={defaultClass}>
           {text.slice(start)}
-        </span>
+        </span>,
       );
     }
 
@@ -154,7 +165,7 @@ export const JsonSyntaxHighlighter: React.FC<JsonSyntaxHighlighterProps> = ({
       case "punct":
         return "text-zinc-400 font-normal";
       default:
-        return "text-zinc-800";
+        return "text-mauve-800";
     }
   };
 
@@ -164,7 +175,9 @@ export const JsonSyntaxHighlighter: React.FC<JsonSyntaxHighlighterProps> = ({
         className || (showLineNumbers ? "bg-white" : "")
       }`}
     >
-      <div className={`inline-block min-w-full ${showLineNumbers ? "py-2" : "py-0"}`}>
+      <div
+        className={`inline-block min-w-full ${showLineNumbers ? "py-2" : "py-0"}`}
+      >
         {tokenizedLines.map((tokens, idx) => {
           const lineNum = idx + 1;
           const isCopied = copiedLine === idx;
@@ -174,7 +187,7 @@ export const JsonSyntaxHighlighter: React.FC<JsonSyntaxHighlighterProps> = ({
             <div
               key={idx}
               className={`group flex items-start leading-5 transition-colors ${
-                showLineNumbers ? "px-2 hover:bg-zinc-100/70" : "px-0"
+                showLineNumbers ? "px-2 hover:bg-mauve-100/70" : "px-0"
               } ${wrapLines ? "break-all whitespace-pre-wrap" : "whitespace-pre"}`}
             >
               {/* Line number gutter */}
@@ -204,12 +217,16 @@ export const JsonSyntaxHighlighter: React.FC<JsonSyntaxHighlighterProps> = ({
                   showLineNumbers ? "border-l border-zinc-100 pl-2" : "px-0"
                 }`}
               >
-                {tokens.length === 0 || (tokens.length === 1 && tokens[0].val === "") ? (
+                {tokens.length === 0 ||
+                (tokens.length === 1 && tokens[0].val === "") ? (
                   <span>&nbsp;</span>
                 ) : (
                   tokens.map((token, tIdx) => (
                     <React.Fragment key={tIdx}>
-                      {renderHighlightedText(token.val, getTokenClassName(token.type))}
+                      {renderHighlightedText(
+                        token.val,
+                        getTokenClassName(token.type),
+                      )}
                     </React.Fragment>
                   ))
                 )}

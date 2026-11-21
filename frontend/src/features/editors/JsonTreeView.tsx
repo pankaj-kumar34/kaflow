@@ -54,7 +54,11 @@ const JsonTreeNode: React.FC<TreeNodeProps> = ({
 
   const renderValue = () => {
     if (value === null) {
-      return <span className="font-mono font-semibold text-red-500 italic">null</span>;
+      return (
+        <span className="font-mono font-semibold text-red-500 italic">
+          null
+        </span>
+      );
     }
     if (value === undefined) {
       return <span className="font-mono text-zinc-400 italic">undefined</span>;
@@ -67,13 +71,13 @@ const JsonTreeNode: React.FC<TreeNodeProps> = ({
       );
     }
     if (typeof value === "number") {
-      return <span className="font-mono font-medium text-amber-600">{value}</span>;
+      return (
+        <span className="font-mono font-medium text-amber-600">{value}</span>
+      );
     }
     if (typeof value === "string") {
       return (
-        <span className="font-mono break-all text-emerald-600">
-          "{value}"
-        </span>
+        <span className="font-mono break-all text-emerald-600">"{value}"</span>
       );
     }
     return null;
@@ -89,7 +93,7 @@ const JsonTreeNode: React.FC<TreeNodeProps> = ({
     return (
       <div className="flex flex-col font-mono text-xs select-text">
         <div
-          className={`group flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 transition-colors hover:bg-zinc-100/80 ${
+          className={`group flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 transition-colors hover:bg-mauve-100/80 ${
             matchesSearch ? "bg-amber-100/70" : ""
           }`}
           onClick={() => onToggle(path)}
@@ -103,7 +107,11 @@ const JsonTreeNode: React.FC<TreeNodeProps> = ({
               onToggle(path);
             }}
           >
-            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {isExpanded ? (
+              <ChevronDown size={12} />
+            ) : (
+              <ChevronRight size={12} />
+            )}
           </button>
 
           {keyName !== undefined && (
@@ -125,10 +133,14 @@ const JsonTreeNode: React.FC<TreeNodeProps> = ({
                 e.stopPropagation();
                 onCopyPath(path);
               }}
-              className="flex cursor-pointer items-center gap-1 rounded bg-zinc-200/60 px-1.5 py-0.5 font-sans text-[10px] text-zinc-600 hover:bg-zinc-200"
+              className="flex cursor-pointer items-center gap-1 rounded bg-mauve-200/60 px-1.5 py-0.5 font-sans text-[10px] text-zinc-600 hover:bg-mauve-200"
               title="Copy JSON Path"
             >
-              {isCopied ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} />}
+              {isCopied ? (
+                <Check size={10} className="text-emerald-600" />
+              ) : (
+                <Copy size={10} />
+              )}
               <span>{isCopied ? "Copied" : "Path"}</span>
             </button>
           </div>
@@ -159,7 +171,7 @@ const JsonTreeNode: React.FC<TreeNodeProps> = ({
 
   return (
     <div
-      className={`group flex items-center gap-1.5 rounded px-1.5 py-1 font-mono text-xs select-text hover:bg-zinc-100/80 ${
+      className={`group flex items-center gap-1.5 rounded px-1.5 py-1 font-mono text-xs select-text hover:bg-mauve-100/80 ${
         matchesSearch ? "bg-amber-100/70" : ""
       }`}
       style={{ paddingLeft: `${depth * 16 + 18}px` }}
@@ -178,7 +190,7 @@ const JsonTreeNode: React.FC<TreeNodeProps> = ({
         <button
           type="button"
           onClick={() => onCopyValue(value)}
-          className="flex cursor-pointer items-center gap-1 rounded bg-zinc-200/60 px-1.5 py-0.5 font-sans text-[10px] text-zinc-600 hover:bg-zinc-200"
+          className="flex cursor-pointer items-center gap-1 rounded bg-mauve-200/60 px-1.5 py-0.5 font-sans text-[10px] text-zinc-600 hover:bg-mauve-200"
           title="Copy Value"
         >
           <Copy size={10} />
@@ -207,7 +219,7 @@ export const JsonTreeView: React.FC<JsonTreeViewProps> = ({ data }) => {
       if (val !== null && typeof val === "object") {
         next[p] = true;
         Object.entries(val as Record<string, unknown>).forEach(([k, v]) =>
-          recurse(v, p ? `${p}.${k}` : k)
+          recurse(v, p ? `${p}.${k}` : k),
         );
       }
     };
@@ -221,7 +233,7 @@ export const JsonTreeView: React.FC<JsonTreeViewProps> = ({ data }) => {
       if (val !== null && typeof val === "object") {
         next[p] = false;
         Object.entries(val as Record<string, unknown>).forEach(([k, v]) =>
-          recurse(v, p ? `${p}.${k}` : k)
+          recurse(v, p ? `${p}.${k}` : k),
         );
       }
     };
@@ -243,15 +255,18 @@ export const JsonTreeView: React.FC<JsonTreeViewProps> = ({ data }) => {
   return (
     <div className="flex h-full flex-col bg-white select-none">
       {/* Search & Actions Bar */}
-      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50/50 px-3">
+      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-zinc-200 bg-mauve-50/50 px-3">
         <div className="relative max-w-xs flex-1">
-          <Search size={12} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-zinc-400" />
+          <Search
+            size={12}
+            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-zinc-400"
+          />
           <input
             type="text"
             placeholder="Filter keys or values..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-6 w-full rounded-md border border-zinc-200 bg-white pr-2 pl-7 text-xs text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-red-500"
+            className="h-6 w-full rounded-md border border-zinc-200 bg-white pr-2 pl-7 text-xs text-mauve-800 outline-none placeholder:text-zinc-400 focus:border-mauve-500"
           />
         </div>
 
@@ -259,7 +274,7 @@ export const JsonTreeView: React.FC<JsonTreeViewProps> = ({ data }) => {
           <button
             type="button"
             onClick={handleExpandAll}
-            className="flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900"
+            className="flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-mauve-200/60 hover:text-mauve-900"
             title="Expand All"
           >
             <ChevronsUpDown size={12} />
@@ -268,7 +283,7 @@ export const JsonTreeView: React.FC<JsonTreeViewProps> = ({ data }) => {
           <button
             type="button"
             onClick={handleCollapseAll}
-            className="flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900"
+            className="flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-mauve-200/60 hover:text-mauve-900"
             title="Collapse All"
           >
             <ChevronsDownUp size={12} />

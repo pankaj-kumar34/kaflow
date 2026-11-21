@@ -7,7 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,13 +21,14 @@ const (
 	keyringService = "kaflow"
 )
 
-// ConnectionManager manages saved connection definitions and active Redis client sessions.
+// ConnectionManager manages saved connection definitions and active Kafka client sessions.
 type ConnectionManager struct {
-	mu          sync.RWMutex
-	connections map[string]models.ConnectionConfig
-	activePool  map[string]*ManagedClient
-	storagePath string
-	Dialer      func(ctx context.Context, network, addr string) (net.Conn, error)
+	mu           sync.RWMutex
+	connections  map[string]models.ConnectionConfig
+	activePool   map[string]*ManagedClient
+	storagePath  string
+	Dialer       func(ctx context.Context, network, addr string) (net.Conn, error)
+	OnDisconnect func(id string)
 }
 
 // NewConnectionManager initializes the manager and loads existing connection configurations.
@@ -68,6 +69,9 @@ func (cm *ConnectionManager) loadFromFile() {
 		if sshPass, err := keyring.Get(keyringService, cfg.Id+"_ssh"); err == nil && sshPass != "" {
 			cfg.Ssh.Passphrase = sshPass
 		}
+		if sshPwd, err := keyring.Get(keyringService, cfg.Id+"_ssh_pass"); err == nil && sshPwd != "" {
+			cfg.Ssh.Password = sshPwd
+		}
 		cm.connections[cfg.Id] = cfg
 	}
 }
@@ -85,11 +89,15 @@ func (cm *ConnectionManager) saveToFile() error {
 		if cfg.Ssh.Passphrase != "" {
 			_ = keyring.Set(keyringService, cfg.Id+"_ssh", cfg.Ssh.Passphrase)
 		}
+		if cfg.Ssh.Password != "" {
+			_ = keyring.Set(keyringService, cfg.Id+"_ssh_pass", cfg.Ssh.Password)
+		}
 
 		// Redact secrets on the disk copy before serialization to prevent plaintext leakage
 		diskCfg := cfg
 		diskCfg.Password = ""
 		diskCfg.Ssh.Passphrase = ""
+		diskCfg.Ssh.Password = ""
 		list = append(list, diskCfg)
 	}
 
@@ -121,11 +129,15 @@ func (cm *ConnectionManager) SaveConnection(cfg models.ConnectionConfig) error {
 	if cfg.Id == "" {
 		cfg.Id = uuid.NewString()
 	}
-	if cfg.Port <= 0 {
-		cfg.Port = 6379
+	for i := range cfg.SeedBrokers {
+		cfg.SeedBrokers[i] = strings.TrimSpace(cfg.SeedBrokers[i])
+	}
+	cfg.SeedBrokers = slices.DeleteFunc(cfg.SeedBrokers, func(s string) bool { return s == "" })
+	if cfg.Name == "" {
+		cfg.Name = strings.Join(cfg.SeedBrokers, ",")
 	}
 	if cfg.Name == "" {
-		cfg.Name = fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+		cfg.Name = "Unnamed cluster"
 	}
 
 	cm.connections[cfg.Id] = cfg
@@ -145,10 +157,11 @@ func (cm *ConnectionManager) DeleteConnection(id string) error {
 	delete(cm.connections, id)
 	_ = keyring.Delete(keyringService, id)
 	_ = keyring.Delete(keyringService, id+"_ssh")
+	_ = keyring.Delete(keyringService, id+"_ssh_pass")
 	return cm.saveToFile()
 }
 
-// Connect establishes a connection to the specified Redis instance.
+// Connect establishes a connection to the specified Kafka cluster.
 func (cm *ConnectionManager) Connect(ctx context.Context, id string) (*models.ConnectionStatus, error) {
 	cm.mu.Lock()
 	cfg, exists := cm.connections[id]
@@ -181,36 +194,30 @@ func (cm *ConnectionManager) Connect(ctx context.Context, id string) (*models.Co
 	}
 
 	cm.mu.Lock()
+	racedClient, raced := cm.activePool[id]
 	cm.activePool[id] = managed
 	cm.mu.Unlock()
+	if raced && racedClient != nil {
+		_ = racedClient.Close()
+	}
 
-	// Gather basic server info
+	// Gather basic cluster info
 	status := &models.ConnectionStatus{
-		Id:          id,
-		Connected:   true,
-		LatencyMs:   latency,
-		ClusterMode: cfg.Type == "cluster",
+		Id:        id,
+		Connected: true,
+		LatencyMs: latency,
 	}
 
 	infoCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	if infoStr, err := managed.Client.Info(infoCtx).Result(); err == nil {
-		lines := strings.Split(infoStr, "\r\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, "redis_version:") {
-				status.ServerVersion = strings.TrimPrefix(line, "redis_version:")
-			} else if strings.HasPrefix(line, "role:") {
-				status.Role = strings.TrimPrefix(line, "role:")
-			} else if strings.HasPrefix(line, "db") && strings.Contains(line, "keys=") {
-				// e.g. db0:keys=123,expires=0,avg_ttl=0
-				parts := strings.Split(line, ",")
-				for _, p := range parts {
-					if idx := strings.Index(p, "keys="); idx != -1 {
-						kCount, _ := strconv.ParseInt(p[idx+5:], 10, 64)
-						status.TotalKeys += kCount
-					}
-				}
+	if meta, err := managed.Admin.Metadata(infoCtx); err == nil {
+		status.ClusterId = meta.Cluster
+		status.ControllerId = meta.Controller
+		status.BrokerCount = len(meta.Brokers)
+		for _, td := range meta.Topics {
+			if td.Err == nil && !td.IsInternal {
+				status.TopicCount++
 			}
 		}
 	}
@@ -229,8 +236,12 @@ func (cm *ConnectionManager) Disconnect(id string) error {
 	if cfgExists && cfg.Ephemeral {
 		delete(cm.connections, id)
 	}
+	onDisconnect := cm.OnDisconnect
 	cm.mu.Unlock()
 
+	if onDisconnect != nil {
+		onDisconnect(id)
+	}
 	if exists && client != nil {
 		return client.Close()
 	}
@@ -256,7 +267,7 @@ func (cm *ConnectionManager) SetActiveClient(id string, mc *ManagedClient) {
 	cm.activePool[id] = mc
 }
 
-// TestConnection attempts a temporary connection and ping to test reachability.
+// TestConnection attempts a temporary connection and metadata request to test reachability.
 func (cm *ConnectionManager) TestConnection(ctx context.Context, cfg models.ConnectionConfig) (string, error) {
 	start := time.Now()
 	client, err := NewManagedClientWithDialer(ctx, cfg, cm.Dialer)
@@ -272,12 +283,22 @@ func (cm *ConnectionManager) TestConnection(ctx context.Context, cfg models.Conn
 // CloseAll terminates all active connections.
 func (cm *ConnectionManager) CloseAll() {
 	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
+	ids := make([]string, 0, len(cm.activePool))
+	clients := make([]*ManagedClient, 0, len(cm.activePool))
 	for id, client := range cm.activePool {
-		if client != nil {
-			_ = client.Close()
-		}
+		ids = append(ids, id)
+		clients = append(clients, client)
 		delete(cm.activePool, id)
+	}
+	onDisconnect := cm.OnDisconnect
+	cm.mu.Unlock()
+
+	for i, id := range ids {
+		if onDisconnect != nil {
+			onDisconnect(id)
+		}
+		if clients[i] != nil {
+			_ = clients[i].Close()
+		}
 	}
 }

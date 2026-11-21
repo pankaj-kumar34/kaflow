@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+/* Kaflow brand: mauve neutral scale (user-supplied, Radix-style, oklch hue ~322–326).
+   Low chroma by design — brand reads as gray-mauve; red stays reserved for danger. */
+@theme {
+  --color-mauve-50: oklch(98.5% 0 0);
+  --color-mauve-100: oklch(96% 0.003 325.6);
+  --color-mauve-200: oklch(92.2% 0.005 325.62);
+  --color-mauve-300: oklch(86.5% 0.012 325.68);
+  --color-mauve-400: oklch(71.1% 0.019 323.02);
+  --color-mauve-500: oklch(54.2% 0.034 322.5);
+  --color-mauve-600: oklch(43.5% 0.029 321.78);
+  --color-mauve-700: oklch(36.4% 0.029 323.89);
+  --color-mauve-800: oklch(26.3% 0.024 320.12);
+  --color-mauve-900: oklch(21.2% 0.019 322.12);
+  --color-mauve-950: oklch(14.5% 0.008 326);
+}
+
 :root {
   color-scheme: light;
 }
@@ -42,7 +58,7 @@ input:not([type="checkbox"]):not([type="radio"]), textarea, select {
 input[type="checkbox"], input[type="radio"] {
   appearance: auto;
   -webkit-appearance: checkbox;
-  accent-color: #dc2626;
+  accent-color: #594c5b;
   cursor: pointer;
 }
 
@@ -107,9 +123,11 @@ textarea::-webkit-scrollbar-corner {
   height: 0 !important;
 }
 
-/* Code and pre elements inherit clean system font */
-code, pre {
-  font-family: inherit;
+/* Code and pre elements inherit clean system font unless overridden by utility classes like font-mono */
+@layer base {
+  code, pre {
+    font-family: inherit;
+  }
 }
 
 /* Sidebar Boot & Shutdown Animation */
@@ -208,5 +226,23 @@ code, pre {
 
 @utility slide-in-from-bottom-2 {
   --tw-enter-translate-y: 0.5rem;
+}
+
+/* Cluster live-poll countdown ring */
+@keyframes cluster-ring {
+  from {
+    stroke-dashoffset: 37.7;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes cluster-ring {
+    from, to {
+      stroke-dashoffset: 0;
+    }
+  }
 }
 

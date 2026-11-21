@@ -8,46 +8,36 @@ import (
 	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kversion"
+	"github.com/twmb/franz-go/pkg/sasl"
+	"github.com/twmb/franz-go/pkg/sasl/oauth"
+	"github.com/twmb/franz-go/pkg/sasl/plain"
+	"github.com/twmb/franz-go/pkg/sasl/scram"
 	"kaflow/backend/models"
 )
 
-type redisVoidLogger struct{}
-
-func (redisVoidLogger) Printf(ctx context.Context, format string, v ...interface{}) {}
-
-func init() {
-	redis.SetLogger(redisVoidLogger{})
-}
-
-// ManagedClient wraps a Redis UniversalClient along with its configuration and optional SSH tunnel.
+// ManagedClient wraps a Kafka client (data + admin) along with its
+// configuration and optional SSH tunnel.
 type ManagedClient struct {
-	Config    models.ConnectionConfig
-	Client    redis.UniversalClient
-	Tunnel    *SSHTunnel
-	dialer    func(ctx context.Context, network, addr string) (net.Conn, error)
-	dbClients map[int]*redis.Client
-	mu        sync.RWMutex
+	Config models.ConnectionConfig
+	Client *kgo.Client
+	Admin  *kadm.Client
+	Tunnel *SSHTunnel
 }
 
 // BuildTLSConfig generates a *tls.Config based on user preferences.
-func BuildTLSConfig(host string, tlsCfg models.TlsConfig) (*tls.Config, error) {
+// ServerName is left empty so franz-go (and the custom dialer) sets SNI per dialed broker.
+func BuildTLSConfig(_ string, tlsCfg models.TlsConfig) (*tls.Config, error) {
 	if !tlsCfg.Enabled {
 		return nil, nil
 	}
 
-	// Extract hostname without port if present
-	sniHost := host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		sniHost = h
-	}
-
 	tc := &tls.Config{
 		InsecureSkipVerify: tlsCfg.InsecureSkipVerify,
-		ServerName:         sniHost,
 	}
 
 	if tlsCfg.CaCert != "" {
@@ -81,217 +71,175 @@ func BuildTLSConfig(host string, tlsCfg models.TlsConfig) (*tls.Config, error) {
 	return tc, nil
 }
 
-// NewManagedClient establishes a new Redis client according to config (Standalone, Sentinel, or Cluster).
-func NewManagedClient(ctx context.Context, cfg models.ConnectionConfig) (*ManagedClient, error) {
-	return NewManagedClientWithDialer(ctx, cfg, nil)
+// BuildSASLMechanism returns the franz-go SASL mechanism for the config, or nil for none.
+func BuildSASLMechanism(cfg models.ConnectionConfig) (sasl.Mechanism, error) {
+	switch strings.ToUpper(cfg.Sasl.Mechanism) {
+	case "":
+		return nil, nil
+	case "PLAIN":
+		return plain.Plain(func(ctx context.Context) (plain.Auth, error) {
+			return plain.Auth{Zid: cfg.Username, User: cfg.Username, Pass: cfg.Password}, nil
+		}), nil
+	case "SCRAM-SHA-256":
+		return scram.Sha256(func(ctx context.Context) (scram.Auth, error) {
+			return scram.Auth{Zid: cfg.Username, User: cfg.Username, Pass: cfg.Password}, nil
+		}), nil
+	case "SCRAM-SHA-512":
+		return scram.Sha512(func(ctx context.Context) (scram.Auth, error) {
+			return scram.Auth{Zid: cfg.Username, User: cfg.Username, Pass: cfg.Password}, nil
+		}), nil
+	case "OAUTHBEARER":
+		// static bearer token: the connection password is the token
+		return oauth.Oauth(func(ctx context.Context) (oauth.Auth, error) {
+			return oauth.Auth{Token: cfg.Password}, nil
+		}), nil
+	default:
+		return nil, fmt.Errorf("unsupported SASL mechanism: %s", cfg.Sasl.Mechanism)
+	}
 }
 
-// NewManagedClientWithDialer establishes a new Redis client with an optional custom net dialer.
-func NewManagedClientWithDialer(ctx context.Context, cfg models.ConnectionConfig, customDialer func(ctx context.Context, network, addr string) (net.Conn, error)) (*ManagedClient, error) {
+// kgoOptions assembles shared client options (seed brokers, SASL, TLS/dialer).
+func kgoOptions(cfg models.ConnectionConfig, customDialer func(ctx context.Context, network, addr string) (net.Conn, error), tunnel *SSHTunnel) ([]kgo.Opt, error) {
+	if len(cfg.SeedBrokers) == 0 {
+		return nil, fmt.Errorf("no seed brokers configured")
+	}
+
+	mechanism, err := BuildSASLMechanism(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(cfg.SeedBrokers...),
+		kgo.ClientID("kaflow"),
+		kgo.MaxConcurrentFetches(3),
+		kgo.DialTimeout(5 * time.Second),
+		kgo.RetryTimeout(8 * time.Second),
+		kgo.MaxVersions(kversion.V3_9_0()),
+		kgo.WithLogger(kgo.BasicLogger(os.Stderr, kgo.LogLevelWarn, nil)),
+	}
+	if mechanism != nil {
+		opts = append(opts, kgo.SASL(mechanism))
+	}
+
+	tlsConfig, err := BuildTLSConfig(cfg.SeedBrokers[0], cfg.Tls)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tls configuration: %w", err)
+	}
+
+	switch {
+	case customDialer != nil || tunnel != nil:
+		// franz-go forbids combining Dialer with DialTLSConfig, so the
+		// dialer itself must wrap TLS when the connection requires it.
+		base := customDialer
+		if tunnel != nil && base == nil {
+			base = tunnel.DialContext
+		}
+		opts = append(opts, kgo.Dialer(func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := base(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			if tlsConfig != nil {
+				host, _, splitErr := net.SplitHostPort(addr)
+				if splitErr != nil {
+					host = addr
+				}
+				tlsCopy := tlsConfig.Clone()
+				if host != "" {
+					tlsCopy.ServerName = host
+				}
+				tlsConn := tls.Client(conn, tlsCopy)
+				if err := tlsConn.HandshakeContext(ctx); err != nil {
+					_ = conn.Close()
+					return nil, fmt.Errorf("tls handshake failed: %w", err)
+				}
+				conn = tlsConn
+			}
+			return conn, nil
+		}))
+	case tlsConfig != nil:
+		opts = append(opts, kgo.DialTLSConfig(tlsConfig))
+	}
+
+	return opts, nil
+}
+
+// NewKgoClient creates a bare franz-go client for the given config with an
+// optional custom dialer (used by the connection manager and by live tails).
+func NewKgoClient(ctx context.Context, cfg models.ConnectionConfig, customDialer func(ctx context.Context, network, addr string) (net.Conn, error)) (*kgo.Client, *SSHTunnel, error) {
 	var tunnel *SSHTunnel
 	var err error
 
 	if cfg.Ssh.Enabled {
 		tunnel, err = NewSSHTunnel(cfg.Ssh)
 		if err != nil {
-			return nil, fmt.Errorf("failed to establish ssh tunnel: %w", err)
+			return nil, nil, fmt.Errorf("failed to establish ssh tunnel: %w", err)
 		}
 	}
 
-	tlsConfig, err := BuildTLSConfig(cfg.Host, cfg.Tls)
+	opts, err := kgoOptions(cfg, customDialer, tunnel)
 	if err != nil {
 		if tunnel != nil {
 			_ = tunnel.Close()
 		}
-		return nil, fmt.Errorf("invalid tls configuration: %w", err)
+		return nil, nil, err
 	}
 
-	var dialer func(ctx context.Context, network, addr string) (net.Conn, error) = customDialer
-	if tunnel != nil {
-		dialer = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return tunnel.DialContext(ctx, network, addr)
-		}
-	}
-
-	var client redis.UniversalClient
-
-	connType := strings.ToLower(cfg.Type)
-	switch connType {
-	case "cluster":
-		addrs := cfg.ClusterNodes
-		if len(addrs) == 0 {
-			addrs = []string{fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)}
-		}
-		client = redis.NewClusterClient(&redis.ClusterOptions{
-			Addrs:        addrs,
-			Username:     cfg.Username,
-			Password:     cfg.Password,
-			TLSConfig:    tlsConfig,
-			Dialer:       dialer,
-			DialTimeout:  4 * time.Second,
-			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 10 * time.Second,
-			ReadOnly:     cfg.ReadOnly,
-			MaxRetries:   2,
-		})
-
-	case "sentinel":
-		addrs := cfg.SentinelNodes
-		if len(addrs) == 0 {
-			addrs = []string{fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)}
-		}
-		client = redis.NewFailoverClient(&redis.FailoverOptions{
-			MasterName:    cfg.SentinelMaster,
-			SentinelAddrs: addrs,
-			Username:      cfg.Username,
-			Password:      cfg.Password,
-			DB:            cfg.Database,
-			TLSConfig:     tlsConfig,
-			Dialer:        dialer,
-			DialTimeout:   4 * time.Second,
-			ReadTimeout:   10 * time.Second,
-			WriteTimeout:  10 * time.Second,
-			MaxRetries:    2,
-		})
-
-	default: // "standalone" or empty
-		addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-		client = redis.NewClient(&redis.Options{
-			Addr:         addr,
-			Username:     cfg.Username,
-			Password:     cfg.Password,
-			DB:           cfg.Database,
-			TLSConfig:    tlsConfig,
-			Dialer:       dialer,
-			DialTimeout:  4 * time.Second,
-			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 10 * time.Second,
-			MaxRetries:   2,
-		})
-	}
-
-	// Verify connection with Ping
-	pingCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-
-	if err := client.Ping(pingCtx).Err(); err != nil {
-		_ = client.Close()
+	client, err := kgo.NewClient(opts...)
+	if err != nil {
 		if tunnel != nil {
 			_ = tunnel.Close()
 		}
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "HTTP/1.1 400 Bad Request") || strings.Contains(errMsg, "HTTP/") {
-			return nil, fmt.Errorf("server responded with 'HTTP/1.1 400 Bad Request'. This server requires TLS/SSL encryption (e.g. AWS ElastiCache, Azure, Upstash, or cloud Redis). Please enable TLS under the 'TLS / SSL' tab (and check 'Skip TLS verification' if using a self-signed or private CA cert)")
-		}
-		if strings.Contains(errMsg, "deadline exceeded") || strings.Contains(errMsg, "i/o timeout") {
-			if strings.Contains(cfg.Host, ".private.") {
-				return nil, fmt.Errorf("connection timed out (context deadline exceeded): This is a private service endpoint and cannot be reached directly over the public internet. Connect to your corporate/cloud VPN (e.g. IBM Cloud VPN) or configure an SSH Tunnel under the 'SSH Tunnel' tab")
-			}
-			return nil, fmt.Errorf("connection timed out (context deadline exceeded): Host could not be reached. Please check your network, VPN, or firewall settings")
-		}
-		return nil, fmt.Errorf("ping failed: %w", err)
+		return nil, nil, err
 	}
-
-	return &ManagedClient{
-		Config:    cfg,
-		Client:    client,
-		Tunnel:    tunnel,
-		dialer:    dialer,
-		dbClients: make(map[int]*redis.Client),
-	}, nil
+	return client, tunnel, nil
 }
 
-// DialRaw opens a dedicated, unpooled TCP/TLS connection to the target Redis node
-// for long-lived streaming commands like MONITOR.
-func (mc *ManagedClient) DialRaw(ctx context.Context) (net.Conn, error) {
-	addr := fmt.Sprintf("%s:%d", mc.Config.Host, mc.Config.Port)
+// NewManagedClient establishes a new Kafka client according to config and
+// verifies reachability with a metadata request.
+func NewManagedClient(ctx context.Context, cfg models.ConnectionConfig) (*ManagedClient, error) {
+	return NewManagedClientWithDialer(ctx, cfg, nil)
+}
 
-	var rawConn net.Conn
-	var err error
-	if mc.dialer != nil {
-		rawConn, err = mc.dialer(ctx, "tcp", addr)
-	} else {
-		rawConn, err = (&net.Dialer{Timeout: 4 * time.Second}).DialContext(ctx, "tcp", addr)
-	}
+// NewManagedClientWithDialer establishes a new Kafka client with an optional custom net dialer.
+func NewManagedClientWithDialer(ctx context.Context, cfg models.ConnectionConfig, customDialer func(ctx context.Context, network, addr string) (net.Conn, error)) (*ManagedClient, error) {
+	client, tunnel, err := NewKgoClient(ctx, cfg, customDialer)
 	if err != nil {
 		return nil, err
 	}
 
-	if mc.Config.Tls.Enabled {
-		tlsConfig, err := BuildTLSConfig(mc.Config.Host, mc.Config.Tls)
-		if err != nil {
-			_ = rawConn.Close()
-			return nil, fmt.Errorf("invalid tls configuration: %w", err)
+	// Verify connection with a metadata request
+	pingCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
+	admin := kadm.NewClient(client)
+	if _, err := admin.Metadata(pingCtx); err != nil {
+		client.Close()
+		if tunnel != nil {
+			_ = tunnel.Close()
 		}
-		tlsConn := tls.Client(rawConn, tlsConfig)
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			_ = tlsConn.Close()
-			return nil, fmt.Errorf("tls handshake failed: %w", err)
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "deadline exceeded") || strings.Contains(errMsg, "i/o timeout") {
+			return nil, fmt.Errorf("connection timed out (context deadline exceeded): Broker could not be reached. Please check your network, VPN, firewall, or SSH tunnel settings")
 		}
-		return tlsConn, nil
+		return nil, fmt.Errorf("metadata request failed: %w", err)
 	}
 
-	return rawConn, nil
+	return &ManagedClient{
+		Config: cfg,
+		Client: client,
+		Admin:  admin,
+		Tunnel: tunnel,
+	}, nil
 }
 
-// GetClientForDB returns a redis.UniversalClient configured for the requested database.
-// In Cluster mode, DB is always 0.
-func (mc *ManagedClient) GetClientForDB(db int) redis.UniversalClient {
-	if strings.ToLower(mc.Config.Type) == "cluster" {
-		return mc.Client
-	}
-
-	// For standalone or sentinel, if DB matches current configuration, reuse Client
-	if mc.Config.Database == db {
-		return mc.Client
-	}
-
-	// For standalone client, create and cache a client for the requested DB
-	if standaloneClient, ok := mc.Client.(*redis.Client); ok {
-		mc.mu.RLock()
-		if c, exists := mc.dbClients[db]; exists {
-			mc.mu.RUnlock()
-			return c
-		}
-		mc.mu.RUnlock()
-
-		mc.mu.Lock()
-		defer mc.mu.Unlock()
-		if c, exists := mc.dbClients[db]; exists {
-			return c
-		}
-
-		opts := standaloneClient.Options()
-		cloneOpts := *opts
-		cloneOpts.DB = db
-		newClient := redis.NewClient(&cloneOpts)
-		mc.dbClients[db] = newClient
-		return newClient
-	}
-
-	return mc.Client
-}
-
-// Close gracefully closes the Redis client and any underlying SSH tunnel.
+// Close gracefully closes the Kafka client and any underlying SSH tunnel.
 func (mc *ManagedClient) Close() error {
 	var errs []string
 
-	// Close cached per-DB clients to prevent resource/connection leaks
-	mc.mu.Lock()
-	for db, c := range mc.dbClients {
-		if c != nil {
-			if err := c.Close(); err != nil {
-				errs = append(errs, fmt.Sprintf("db %d: %s", db, err.Error()))
-			}
-		}
-	}
-	mc.dbClients = make(map[int]*redis.Client)
-	mc.mu.Unlock()
-
 	if mc.Client != nil {
-		if err := mc.Client.Close(); err != nil {
-			errs = append(errs, err.Error())
-		}
+		mc.Client.Close()
 	}
 	if mc.Tunnel != nil {
 		if err := mc.Tunnel.Close(); err != nil {

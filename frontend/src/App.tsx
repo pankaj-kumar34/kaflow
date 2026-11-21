@@ -1,12 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   Server,
-  Key,
-  Braces,
-  Terminal as TermIcon,
+  FolderTree,
   Gauge,
-  Radio,
-  Activity,
+  Users,
   Plus,
   AlertTriangle,
   Clock,
@@ -14,7 +11,6 @@ import {
   Zap,
   PanelLeftClose,
   PanelLeft,
-  Database,
   Lock,
   Unplug,
   Edit2,
@@ -36,12 +32,10 @@ import {
 import { Events } from "@wailsio/runtime";
 import { ConnectionList } from "./features/connections/ConnectionList";
 import { ConnectionProfile } from "./features/connections/ConnectionProfile";
-import { KeyExplorer } from "./features/explorer/KeyExplorer";
-import { KeyValueViewer } from "./features/editors/KeyValueViewer";
-import { Terminal } from "./features/terminal/Terminal";
-import { ServerMetricsDashboard } from "./features/diagnostics/ServerMetricsDashboard";
-import { PubSubDebugger } from "./features/pubsub/PubSubDebugger";
-import { MonitorViewer } from "./features/monitor/MonitorViewer";
+import { TopicExplorer } from "./features/topics/TopicExplorer";
+import { ClusterDashboard } from "./features/cluster/ClusterDashboard";
+import { GroupsView } from "./features/groups/GroupsView";
+import { TailService } from "../bindings/kaflow/backend/services/index.js";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import { ConfirmModal } from "./components/ui/ConfirmModal";
@@ -63,7 +57,7 @@ interface KaflowWindowBridge extends Window {
 }
 
 export function App() {
-  const { error: toastError } = useToast();
+  const { error: toastError, info: toastInfo } = useToast();
   const [connections, setConnections] = useState<ConnectionConfig[]>([]);
   const [activeConnId, setActiveConnId] = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState<ConnectionStatus | null>(
@@ -71,12 +65,8 @@ export function App() {
   );
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "terminal" | "explorer" | "diagnostics" | "pubsub" | "monitor"
-  >("terminal");
-  const [currentDb, setCurrentDb] = useState(0);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [deletedKeyInfo, setDeletedKeyInfo] = useState<{ key: string; id: number } | null>(null);
-  const [renamedKeyInfo, setRenamedKeyInfo] = useState<{ oldKey: string; newKey: string; id: number } | null>(null);
+    "topics" | "cluster" | "groups"
+  >("topics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const isMac = isMacPlatform();
@@ -96,26 +86,17 @@ export function App() {
   const [versionInfo, setVersionInfo] = useState<AppVersionInfo | null>(null);
   const [updateCheckResult, setUpdateCheckResult] =
     useState<UpdateCheckResult | null>(null);
-  const [activePubSubChannels, setActivePubSubChannels] = useState<string[]>(
-    [],
-  );
-  const [pendingPubSubAction, setPendingPubSubAction] = useState<{
-    type: "connect" | "disconnect";
-    id: string;
-    directConn?: ConnectionConfig;
-    title: string;
-    description: string;
-    confirmText: string;
-  } | null>(null);
 
-  const [ephemeralConn, setEphemeralConn] = useState<ConnectionConfig | null>(null);
+  const [ephemeralConn, setEphemeralConn] = useState<ConnectionConfig | null>(
+    null,
+  );
 
   // Stable refs for event listeners and global window bridge
   const connectionsRef = useRef(connections);
   const activeConnIdRef = useRef(activeConnId);
   const activeStatusRef = useRef(activeStatus);
   const handleNavTabRef = useRef<
-    (tab: "terminal" | "explorer" | "diagnostics" | "pubsub" | "monitor") => void
+    (tab: "topics" | "cluster" | "groups") => void
   >(() => {});
   const handleOpenAddRef = useRef<() => void>(() => {});
 
@@ -150,11 +131,11 @@ export function App() {
           status?.errorMessage || "Failed to establish connection",
         );
       }
-      const initialDb = conn?.type === "cluster" ? 0 : (conn?.database ?? 0);
       setActiveConnId(id);
       setActiveStatus(status);
-      setSelectedKey(null);
-      setCurrentDb(initialDb);
+      setActiveTab("topics");
+      setIsEditingProfile(false);
+      setEditingConfig(null);
 
       // Clean up previous active connection on the backend if switching to a different server
       if (previousConnId && previousConnId !== id) {
@@ -162,7 +143,9 @@ export function App() {
           .then(() => {
             if (ephemeralConn?.id === previousConnId) {
               setEphemeralConn(null);
-              ConnectionService.DeleteConnection(previousConnId).catch(() => {});
+              ConnectionService.DeleteConnection(previousConnId).catch(
+                () => {},
+              );
             }
             const prevConn = connectionsRef.current.find(
               (c) => c.id === previousConnId,
@@ -189,11 +172,14 @@ export function App() {
       return true;
     } catch (err: unknown) {
       let errMsg = getErrorMessage(err) || "Unknown error";
-      // Remove dial host:port prefix and any host reference so server host is not exposed in toast
+      // Remove dial host:port prefix and any broker reference so cluster hosts are not exposed in toast
       errMsg = errMsg.replace(/dial (?:tcp|udp)?\s*[^:]+:\d+:\s*/gi, "");
       errMsg = errMsg.replace(/lookup\s+[^:]+:\s*/gi, "lookup: ");
-      if (conn?.host && conn.host.trim()) {
-        errMsg = errMsg.split(conn.host).join("");
+      for (const broker of conn?.seedBrokers ?? []) {
+        const host = broker.split(":")[0];
+        if (host && host.trim()) {
+          errMsg = errMsg.split(host).join("");
+        }
       }
       errMsg = errMsg.replace(/^:\s*/, "").trim();
 
@@ -222,10 +208,10 @@ export function App() {
       if (activeConnId === id) {
         setActiveConnId(null);
         setActiveStatus(null);
-        setSelectedKey(null);
-        setActiveTab("terminal");
-        setCurrentDb(0);
+        setActiveTab("topics");
       }
+      // Stop any live tail left running on this connection
+      TailService.StopTail(id).catch(() => {});
       await loadConnections();
     } catch (err: unknown) {
       toastError(
@@ -235,72 +221,32 @@ export function App() {
     }
   };
 
+  // Stop any live tail before switching/disconnecting so background streams don't linger
+  const stopActiveTailIfAny = async (id: string) => {
+    try {
+      if (await TailService.IsTailing(id)) {
+        await TailService.StopTail(id);
+        toastInfo("Stream stopped");
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   const requestConnect = (id: string, directConn?: ConnectionConfig) => {
-    if (activeConnId === id) return;
-
-    if (activeConnId && activePubSubChannels.length > 0) {
-      const activeConn = connections.find((c) => c.id === activeConnId);
-      const activeName = activeConn?.name || "current server";
-      const targetConn = directConn || connections.find((c) => c.id === id);
-      const targetName = targetConn?.name || "new server";
-
-      setPendingPubSubAction({
-        type: "connect",
-        id,
-        directConn,
-        title: "Active Pub/Sub Subscriptions",
-        description: `You are currently subscribed to ${activePubSubChannels.length} channel${
-          activePubSubChannels.length > 1 ? "s" : ""
-        } (${activePubSubChannels.join(", ")}) on "${activeName}". Switching to "${targetName}" will cancel these subscriptions. Do you want to proceed?`,
-        confirmText: "Switch Connection",
-      });
+    if (activeConnId === id) {
+      setIsEditingProfile(false);
+      setEditingConfig(null);
+      setActiveTab("topics");
       return;
     }
-
+    if (activeConnId) stopActiveTailIfAny(activeConnId);
     handleConnect(id, directConn);
   };
 
   const requestDisconnect = (id: string) => {
-    if (activeConnId === id && activePubSubChannels.length > 0) {
-      const activeConn = connections.find((c) => c.id === activeConnId);
-      const activeName = activeConn?.name || "current server";
-
-      setPendingPubSubAction({
-        type: "disconnect",
-        id,
-        title: "Active Pub/Sub Subscriptions",
-        description: `You are currently subscribed to ${activePubSubChannels.length} channel${
-          activePubSubChannels.length > 1 ? "s" : ""
-        } (${activePubSubChannels.join(", ")}) on "${activeName}". Disconnecting will cancel these subscriptions. Do you want to proceed?`,
-        confirmText: "Disconnect",
-      });
-      return;
-    }
-
+    stopActiveTailIfAny(id);
     handleDisconnect(id);
-  };
-
-  const handleConfirmPubSubAction = () => {
-    if (!pendingPubSubAction) return;
-    const action = pendingPubSubAction;
-    setPendingPubSubAction(null);
-
-    if (action.id === "__localhost_quick__") {
-      proceedQuickConnectLocal();
-    } else if (action.type === "connect") {
-      handleConnect(action.id, action.directConn);
-    } else if (action.type === "disconnect") {
-      handleDisconnect(action.id);
-    }
-  };
-
-  const handleCancelPubSubAction = () => {
-    setPendingPubSubAction(null);
-  };
-
-  const handleSelectDb = (db: number) => {
-    setCurrentDb(db);
-    setSelectedKey(null);
   };
 
   const handleOpenAdd = () => {
@@ -309,16 +255,13 @@ export function App() {
   };
 
   const handleNavTab = (
-    tab: "terminal" | "explorer" | "diagnostics" | "pubsub" | "monitor",
+    tab: "topics" | "cluster" | "groups",
   ) => {
     const isConn = !!(
       activeConnIdRef.current && activeStatusRef.current?.connected
     );
     if (isConn) {
       setActiveTab(tab);
-      if (tab === "explorer") {
-        setSidebarCollapsed(true);
-      }
       setIsEditingProfile(false);
       setEditingConfig(null);
       return;
@@ -329,9 +272,6 @@ export function App() {
       const targetConn =
         conns.find((c) => c.id === activeConnIdRef.current) || conns[0];
       setActiveTab(tab);
-      if (tab === "explorer") {
-        setSidebarCollapsed(true);
-      }
       setIsEditingProfile(false);
       setEditingConfig(null);
       handleConnect(targetConn.id, targetConn);
@@ -339,15 +279,13 @@ export function App() {
     }
 
     const tabLabels: Record<string, string> = {
-      terminal: `Console (${modSymbol}1)`,
-      explorer: `Explorer (${modSymbol}2)`,
-      diagnostics: `Diagnostics (${modSymbol}3)`,
-      pubsub: `Pub / Sub (${modSymbol}4)`,
-      monitor: `Monitor (${modSymbol}5)`,
+      topics: `Topics (${modSymbol}1)`,
+      groups: `Groups (${modSymbol}2)`,
+      cluster: `Cluster (${modSymbol}3)`,
     };
     toastError(
       "Connection Required",
-      `Connect to a Redis instance first to access ${tabLabels[tab] || tab}.`,
+      `Connect to a Kafka cluster first to access ${tabLabels[tab] || tab}.`,
     );
   };
 
@@ -385,13 +323,12 @@ export function App() {
     // 1. Listen for native desktop shortcuts via Wails Events
     const cancelNav = Events.On("nav:tab", (eventData: unknown) => {
       const raw = eventData as { data?: unknown } | string | null;
-      const tab = raw && typeof raw === "object" && "data" in raw ? raw.data : raw;
+      const tab =
+        raw && typeof raw === "object" && "data" in raw ? raw.data : raw;
       if (
-        tab === "terminal" ||
-        tab === "explorer" ||
-        tab === "diagnostics" ||
-        tab === "pubsub" ||
-        tab === "monitor"
+        tab === "topics" ||
+        tab === "cluster" ||
+        tab === "groups"
       ) {
         handleNavTabRef.current(tab);
       }
@@ -425,11 +362,9 @@ export function App() {
     const win = window as KaflowWindowBridge;
     win.__navTab = (tab: unknown) => {
       if (
-        tab === "terminal" ||
-        tab === "explorer" ||
-        tab === "diagnostics" ||
-        tab === "pubsub" ||
-        tab === "monitor"
+        tab === "topics" ||
+        tab === "cluster" ||
+        tab === "groups"
       ) {
         handleNavTabRef.current(tab);
       }
@@ -489,8 +424,6 @@ export function App() {
       const is1 = e.key === "1" || e.code === "Digit1" || e.code === "Numpad1";
       const is2 = e.key === "2" || e.code === "Digit2" || e.code === "Numpad2";
       const is3 = e.key === "3" || e.code === "Digit3" || e.code === "Numpad3";
-      const is4 = e.key === "4" || e.code === "Digit4" || e.code === "Numpad4";
-      const is5 = e.key === "5" || e.code === "Digit5" || e.code === "Numpad5";
       const isB = e.key === "b" || e.key === "B" || e.code === "KeyB";
       const isN = e.key === "n" || e.key === "N" || e.code === "KeyN";
 
@@ -505,23 +438,15 @@ export function App() {
       } else if (is1) {
         e.preventDefault();
         e.stopPropagation();
-        handleNavTabRef.current("terminal");
+        handleNavTabRef.current("topics");
       } else if (is2) {
         e.preventDefault();
         e.stopPropagation();
-        handleNavTabRef.current("explorer");
+        handleNavTabRef.current("groups");
       } else if (is3) {
         e.preventDefault();
         e.stopPropagation();
-        handleNavTabRef.current("diagnostics");
-      } else if (is4) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleNavTabRef.current("pubsub");
-      } else if (is5) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleNavTabRef.current("monitor");
+        handleNavTabRef.current("cluster");
       }
     };
 
@@ -571,10 +496,9 @@ export function App() {
       if (activeConnId === id) {
         setActiveConnId(null);
         setActiveStatus(null);
-        setSelectedKey(null);
-        setActiveTab("terminal");
-        setCurrentDb(0);
+        setActiveTab("topics");
       }
+      TailService.StopTail(id).catch(() => {});
 
       // If editing this connection, exit edit mode
       if (editingConfig?.id === id) {
@@ -589,12 +513,11 @@ export function App() {
   };
 
   const proceedQuickConnectLocal = async () => {
-    // Check if user already has a saved (non-ephemeral) connection for localhost:6379
+    // Check if user already has a saved (non-ephemeral) connection for localhost:9092
+    const isLocal = (brokers: string[]) =>
+      brokers.some((b) => /^(127\.0\.0\.1|localhost)(:9092)?$/.test(b.trim()));
     const existingSaved = connections.find(
-      (c) =>
-        !c.ephemeral &&
-        (c.host === "127.0.0.1" || c.host === "localhost") &&
-        c.port === 6379,
+      (c) => !c.ephemeral && isLocal(c.seedBrokers),
     );
     if (existingSaved) {
       await handleConnect(existingSaved.id, existingSaved);
@@ -603,7 +526,7 @@ export function App() {
 
     // Clean up any stale ephemeral localhost entries from previous failed attempts
     const staleEphemerals = connections.filter(
-      (c) => c.ephemeral && (c.host === "127.0.0.1" || c.host === "localhost"),
+      (c) => c.ephemeral && isLocal(c.seedBrokers),
     );
     for (const stale of staleEphemerals) {
       await ConnectionService.DeleteConnection(stale.id);
@@ -618,15 +541,10 @@ export function App() {
     const newLocal: ConnectionConfig = {
       id: tempId,
       name: "Localhost",
-      host: "127.0.0.1",
-      port: 6379,
+      seedBrokers: ["localhost:9092"],
       username: "",
       password: "",
-      database: 0,
-      type: "standalone",
-      sentinelMaster: "",
-      sentinelNodes: [],
-      clusterNodes: [],
+      sasl: { mechanism: "" },
       ssh: {
         enabled: false,
         host: "",
@@ -687,33 +605,17 @@ export function App() {
       const active =
         connections.find((c) => c.id === activeConnId) ||
         (ephemeralConn?.id === activeConnId ? ephemeralConn : null);
-      if (
-        active &&
-        (active.host === "127.0.0.1" || active.host === "localhost") &&
-        active.port === 6379
-      ) {
+      const isLocal = (brokers: string[]) =>
+        brokers.some((b) =>
+          /^(127\.0\.0\.1|localhost)(:9092)?$/.test(b.trim()),
+        );
+      if (active && isLocal(active.seedBrokers)) {
         return;
       }
     }
 
-    // Check if there are active Pub/Sub subscriptions on current connection
-    if (activeConnId && activePubSubChannels.length > 0) {
-      const activeConn =
-        connections.find((c) => c.id === activeConnId) ||
-        (ephemeralConn?.id === activeConnId ? ephemeralConn : null);
-      const activeName = activeConn?.name || "current server";
-
-      setPendingPubSubAction({
-        type: "connect",
-        id: "__localhost_quick__",
-        title: "Active Pub/Sub Subscriptions",
-        description: `You are currently subscribed to ${activePubSubChannels.length} channel${
-          activePubSubChannels.length > 1 ? "s" : ""
-        } (${activePubSubChannels.join(", ")}) on "${activeName}". Connecting to Localhost will cancel these subscriptions. Do you want to proceed?`,
-        confirmText: "Switch Connection",
-      });
-      return;
-    }
+    // Stop any live tail before switching
+    if (activeConnId) stopActiveTailIfAny(activeConnId);
 
     await proceedQuickConnectLocal();
   };
@@ -786,7 +688,7 @@ export function App() {
   }, [connections, ephemeralConn]);
 
   return (
-    <div className="flex size-full overflow-hidden bg-[#fafafa] font-sans text-zinc-900 select-none">
+    <div className="flex size-full overflow-hidden bg-[#fafafa] font-sans text-mauve-900 select-none">
       {/* 1. Left Sidebar: Connection Management (Collapsible) */}
       <ConnectionList
         connections={sidebarConnections}
@@ -827,12 +729,11 @@ export function App() {
               await loadConnections();
               setIsEditingProfile(false);
               setEditingConfig(null);
-              if (andConnect) {
+              if (activeConnId === savedCfg.id) {
+                stopActiveTailIfAny(savedCfg.id);
+                handleConnect(savedCfg.id, savedCfg);
+              } else if (andConnect) {
                 requestConnect(savedCfg.id, savedCfg);
-              } else if (activeConnId === savedCfg.id) {
-                const updatedDb =
-                  savedCfg.type === "cluster" ? 0 : (savedCfg.database ?? 0);
-                setCurrentDb(updatedDb);
               }
             }}
           />
@@ -899,7 +800,7 @@ export function App() {
               <div className="z-10 flex shrink-0 items-center gap-2.5 text-xs">
                 <button
                   onClick={() => setSidebarCollapsed((prev) => !prev)}
-                  className="mr-1 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                  className="mr-1 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-mauve-100 hover:text-mauve-900"
                   title={
                     sidebarCollapsed
                       ? `Expand Sidebar (${modSymbol}B)`
@@ -912,27 +813,19 @@ export function App() {
                     <PanelLeftClose size={16} />
                   )}
                 </button>
-                {activeTab === "terminal" && (
-                  <TermIcon size={15} className="text-red-600" />
+                {activeTab === "topics" && (
+                  <FolderTree size={15} className="text-mauve-600" />
                 )}
-                {activeTab === "explorer" && (
-                  <Braces size={15} className="text-red-600" />
+                {activeTab === "groups" && (
+                  <Users size={15} className="text-mauve-600" />
                 )}
-                {activeTab === "diagnostics" && (
-                  <Gauge size={15} className="text-red-600" />
+                {activeTab === "cluster" && (
+                  <Gauge size={15} className="text-mauve-600" />
                 )}
-                {activeTab === "pubsub" && (
-                  <Radio size={15} className="text-red-600" />
-                )}
-                {activeTab === "monitor" && (
-                  <Activity size={15} className="text-red-600" />
-                )}
-                <span className="text-sm font-bold text-zinc-900">
-                  {activeTab === "terminal" && "Console"}
-                  {activeTab === "explorer" && "Explorer"}
-                  {activeTab === "diagnostics" && "Diagnostics"}
-                  {activeTab === "pubsub" && "Pub / Sub"}
-                  {activeTab === "monitor" && "Monitor"}
+                <span className="text-sm font-bold text-mauve-900">
+                  {activeTab === "topics" && "Topics"}
+                  {activeTab === "cluster" && "Cluster"}
+                  {activeTab === "groups" && "Groups"}
                 </span>
               </div>
 
@@ -948,125 +841,60 @@ export function App() {
                 )}
 
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={() => requestDisconnect(activeConnection.id)}
-                  className="h-8 cursor-pointer gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 shadow-2xs transition-all hover:border-red-300 hover:bg-red-100 hover:text-red-800 active:scale-98"
+                  className="text-zinc-500 hover:bg-red-50 hover:text-red-600"
                   title="Disconnect from active session"
                 >
-                  <Unplug size={13} className="text-red-600" />
+                  <Unplug size={13} />
                   <span>Disconnect</span>
                 </Button>
               </div>
             </div>
 
             {/* Main Tab Views (State preserved across navigation within active connection) */}
-            <div key={activeConnection.id} className="relative flex flex-1 overflow-hidden">
-              {/* 1. Terminal / Console View */}
-              <div
-                className={`flex size-full flex-col ${
-                  activeTab === "terminal" ? "flex" : "hidden"
-                }`}
-              >
-                <Terminal
-                  connId={activeConnection.id}
-                  db={currentDb}
-                  host={activeConnection.host}
-                  port={activeConnection.port}
-                  isActive={activeTab === "terminal"}
-                />
-              </div>
-
-              {/* 2. Key Explorer & Value Viewer */}
+            <div
+              key={activeConnection.id}
+              className="relative flex flex-1 overflow-hidden"
+            >
+              {/* 1. Topic Explorer */}
               <div
                 className={`size-full ${
-                  activeTab === "explorer" ? "flex" : "hidden"
+                  activeTab === "topics" ? "flex" : "hidden"
                 }`}
               >
-                <KeyExplorer
+                <TopicExplorer
                   connId={activeConnection.id}
-                  clusterMode={activeConnection.type === "cluster"}
                   readOnly={activeConnection.readOnly}
-                  selectedKey={selectedKey}
-                  currentDb={currentDb}
-                  onSelectDb={handleSelectDb}
-                  onSelectKey={(k, db) => {
-                    setSelectedKey(k);
-                    setCurrentDb(db);
-                  }}
-                  deletedKeyInfo={deletedKeyInfo}
-                  renamedKeyInfo={renamedKeyInfo}
-                  onKeyDeleted={() => setSelectedKey(null)}
-                  isActive={activeTab === "explorer"}
-                />
-                {selectedKey ? (
-                  <KeyValueViewer
-                    key={`${activeConnection.id}-${currentDb}-${selectedKey}`}
-                    connId={activeConnection.id}
-                    db={currentDb}
-                    keyName={selectedKey}
-                    readOnly={activeConnection.readOnly}
-                    onKeyDeleted={(k) => {
-                      setSelectedKey(null);
-                      if (k) setDeletedKeyInfo({ key: k, id: Date.now() });
-                    }}
-                    onKeyRenamed={(newKey, oldKey) => {
-                      setSelectedKey(newKey);
-                      if (oldKey)
-                        setRenamedKeyInfo({ oldKey, newKey, id: Date.now() });
-                    }}
-                  />
-                ) : (
-                  <div className="flex h-full flex-1 flex-col items-center justify-center gap-2.5 bg-[#fafafa] p-6 text-zinc-400 select-none">
-                    <div className="mb-1 flex size-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-400 shadow-2xs">
-                      <Key size={22} className="text-zinc-500 opacity-70" />
-                    </div>
-                    <p className="text-xs font-semibold text-zinc-700">
-                      Select a key from the explorer on the left to inspect
-                      and edit its value.
-                    </p>
-                    <p className="max-w-sm text-center text-[11px] leading-relaxed text-zinc-400">
-                      Supports Strings, Hashes, Lists, Sets, Sorted Sets,
-                      Streams, and JSON documents.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* 3. Server Metrics Dashboard */}
-              <div
-                className={`size-full ${
-                  activeTab === "diagnostics" ? "block" : "hidden"
-                }`}
-              >
-                <ServerMetricsDashboard
-                  connId={activeConnection.id}
-                  db={currentDb}
-                  isActive={activeTab === "diagnostics"}
+                  isActive={activeTab === "topics"}
                 />
               </div>
 
-              {/* 4. Pub/Sub Debugger */}
+              {/* 2. Consumer Groups */}
               <div
                 className={`size-full ${
-                  activeTab === "pubsub" ? "block" : "hidden"
+                  activeTab === "groups" ? "block" : "hidden"
                 }`}
               >
-                <PubSubDebugger
+                <GroupsView
                   connId={activeConnection.id}
-                  onSubscribedChannelsChange={setActivePubSubChannels}
+                  readOnly={activeConnection.readOnly}
+                  isActive={activeTab === "groups"}
                 />
               </div>
 
-              {/* 5. Real-Time Command Monitor */}
+              {/* 3. Cluster Health Dashboard */}
               <div
                 className={`size-full ${
-                  activeTab === "monitor" ? "block" : "hidden"
+                  activeTab === "cluster" ? "block" : "hidden"
                 }`}
               >
-                <MonitorViewer
+                <ClusterDashboard
                   connId={activeConnection.id}
-                  clusterMode={activeConnection.type === "cluster"}
+                  isActive={activeTab === "cluster"}
+                  connectionName={activeConnection.name}
+                  envColor={activeEnv?.color}
                 />
               </div>
             </div>
@@ -1078,7 +906,7 @@ export function App() {
               <div className="flex items-center gap-2.5 text-xs">
                 <button
                   onClick={() => setSidebarCollapsed((prev) => !prev)}
-                  className="mr-1 flex size-8 cursor-pointer items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                  className="mr-1 flex size-8 cursor-pointer items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-mauve-100 hover:text-mauve-900"
                   title={
                     sidebarCollapsed
                       ? `Expand Sidebar (${modSymbol}B)`
@@ -1091,8 +919,17 @@ export function App() {
                     <PanelLeftClose size={16} />
                   )}
                 </button>
-                <Server size={15} className="text-red-600" />
-                <span className="text-sm font-bold text-zinc-900">
+                <Server size={15} className="text-mauve-600" />
+                {activeTab === "topics" && (
+                  <FolderTree size={15} className="text-mauve-600" />
+                )}
+                {activeTab === "groups" && (
+                  <Users size={15} className="text-mauve-600" />
+                )}
+                {activeTab === "cluster" && (
+                  <Gauge size={15} className="text-mauve-600" />
+                )}
+                <span className="text-sm font-bold text-mauve-900">
                   Overview
                 </span>
               </div>
@@ -1103,22 +940,22 @@ export function App() {
               <div className="mx-auto max-w-6xl space-y-8 sm:space-y-9">
                 {/* Hero Header */}
                 <div className="relative flex flex-col justify-between gap-4 overflow-hidden rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-2xs sm:flex-row sm:items-center sm:p-5">
-                  <div className="pointer-events-none absolute top-0 right-0 size-80 rounded-full bg-red-600/5 blur-3xl" />
+                  <div className="pointer-events-none absolute -top-20 -right-20 size-96 rounded-full bg-mauve-500/10 blur-3xl" />
 
                   <div className="z-10 flex items-start gap-4 sm:items-center">
                     <img
                       src="/icon.png"
                       alt="Kaflow"
-                      className="size-16 shrink-0 rounded-xl object-contain shadow-md shadow-red-600/10 select-none"
+                      className="size-16 shrink-0 rounded-xl object-contain shadow-md shadow-mauve-600/10 select-none"
                     />
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-lg font-bold tracking-tight text-zinc-900 sm:text-xl">
+                        <h2 className="text-lg font-bold tracking-tight text-mauve-900 sm:text-xl">
                           Welcome to Kaflow
                         </h2>
                         <button
                           onClick={() => setIsUpdaterOpen(true)}
-                          className="cursor-pointer rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700 transition-colors hover:bg-red-100"
+                          className="cursor-pointer rounded-full border border-mauve-200 bg-mauve-50 px-2 py-0.5 text-[11px] font-medium text-mauve-700 transition-colors hover:bg-mauve-100"
                           title="Click to check for updates"
                         >
                           v{versionInfo?.version || "1.0.0"}
@@ -1136,7 +973,7 @@ export function App() {
                       onClick={handleOpenAdd}
                       variant="default"
                       size="sm"
-                      className="h-9 cursor-pointer gap-1.5 rounded-lg bg-red-600 px-4 text-xs font-semibold text-white shadow-xs shadow-red-600/15 hover:bg-red-500 sm:text-sm"
+                      className="h-9 cursor-pointer gap-1.5 rounded-lg bg-mauve-600 px-4 text-xs font-semibold text-white shadow-xs shadow-mauve-600/15 hover:bg-mauve-500 sm:text-sm"
                     >
                       <Plus size={15} />
                       <span>New Connection</span>
@@ -1146,7 +983,7 @@ export function App() {
                       disabled={!!connectingId}
                       variant="outline"
                       size="sm"
-                      className={`h-9 cursor-pointer gap-1.5 rounded-lg border-zinc-200 px-3.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 sm:text-sm ${
+                      className={`h-9 cursor-pointer gap-1.5 rounded-lg border-zinc-200 px-3.5 text-xs font-medium text-zinc-700 hover:bg-mauve-50 sm:text-sm ${
                         connectingId?.startsWith("ephemeral-local")
                           ? "cursor-wait opacity-75"
                           : connectingId
@@ -1158,13 +995,13 @@ export function App() {
                         <>
                           <RefreshCw
                             size={13.5}
-                            className="animate-spin text-red-600"
+                            className="animate-spin text-mauve-600"
                           />
                           <span>Connecting...</span>
                         </>
                       ) : (
                         <>
-                          <Zap size={13.5} className="text-red-600" />
+                          <Zap size={13.5} className="text-red-900" />
                           <span>Connect to Localhost</span>
                         </>
                       )}
@@ -1180,8 +1017,8 @@ export function App() {
                       {envBreakdown.length > 0 && (
                         <div className="space-y-3.5">
                           <div className="flex items-center justify-between px-1">
-                            <h3 className="flex items-center gap-2 text-xs font-bold tracking-wider text-zinc-800 uppercase">
-                              <Layers size={13.5} className="text-red-600" />
+                            <h3 className="flex items-center gap-2 text-xs font-bold tracking-wider text-mauve-800 uppercase">
+                              <Layers size={13.5} className="text-mauve-600" />
                               <span>Environments</span>
                             </h3>
                           </div>
@@ -1197,7 +1034,7 @@ export function App() {
                                     className="size-2.5 shrink-0 rounded-full shadow-2xs"
                                     style={{ backgroundColor: env.color }}
                                   />
-                                  <span className="truncate text-xs font-semibold text-zinc-800">
+                                  <span className="truncate text-xs font-semibold text-mauve-800">
                                     {env.label}
                                   </span>
                                 </div>
@@ -1220,8 +1057,8 @@ export function App() {
                       {/* Recent Connections (Top 3) */}
                       <div className="space-y-3.5">
                         <div className="flex items-center justify-between px-1">
-                          <h3 className="flex items-center gap-2 text-xs font-bold tracking-wider text-zinc-800 uppercase">
-                            <Clock size={13.5} className="text-red-600" />
+                          <h3 className="flex items-center gap-2 text-xs font-bold tracking-wider text-mauve-800 uppercase">
+                            <Clock size={13.5} className="text-mauve-600" />
                             <span>Recent Connections</span>
                           </h3>
                         </div>
@@ -1275,7 +1112,7 @@ export function App() {
                                 <div className="flex items-start justify-between gap-2.5">
                                   <div className="min-w-0 flex-1 overflow-hidden">
                                     <div className="flex min-w-0 items-center gap-2">
-                                      <h4 className="truncate text-sm font-bold text-zinc-900 transition-colors">
+                                      <h4 className="truncate text-sm font-bold text-mauve-900 transition-colors">
                                         {conn.name}
                                       </h4>
                                       <span
@@ -1287,12 +1124,9 @@ export function App() {
                                     <div className="mt-1 flex items-center font-mono text-xs text-zinc-500">
                                       <span
                                         className="truncate"
-                                        title={conn.host}
+                                        title={conn.seedBrokers.join(", ")}
                                       >
-                                        {conn.host}
-                                      </span>
-                                      <span className="shrink-0 text-zinc-400">
-                                        :{conn.port}
+                                        {conn.seedBrokers.join(", ")}
                                       </span>
                                     </div>
                                   </div>
@@ -1303,7 +1137,7 @@ export function App() {
                                         e.stopPropagation();
                                         handleOpenEdit(conn);
                                       }}
-                                      className="flex size-7 cursor-pointer items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-800"
+                                      className="flex size-7 cursor-pointer items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-mauve-800"
                                       title="Edit Connection"
                                     >
                                       <Edit2 size={12.5} />
@@ -1342,16 +1176,15 @@ export function App() {
                                         <Shield size={10} /> Read-Only
                                       </span>
                                     )}
-                                    <span className="flex items-center gap-1 rounded border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] text-zinc-600">
-                                      <Database
-                                        size={10}
-                                        className="text-zinc-500"
-                                      />{" "}
-                                      DB {conn.database || 0}
-                                    </span>
-                                    {conn.type === "cluster" && (
-                                      <span className="rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
-                                        Cluster
+                                    {conn.sasl?.mechanism && (
+                                      <span className="flex items-center gap-1 rounded border border-mauve-200 bg-mauve-50 px-1.5 py-0.5 text-[10px] font-semibold text-mauve-700">
+                                        <Lock size={10} />
+                                        {conn.sasl.mechanism}
+                                      </span>
+                                    )}
+                                    {conn.ssh?.enabled && (
+                                      <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
+                                        SSH
                                       </span>
                                     )}
                                   </div>
@@ -1363,16 +1196,22 @@ export function App() {
                                       }
                                     }}
                                     disabled={isConnecting}
-                                    className={`flex size-7.5 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-transparent transition-all hover:bg-zinc-100 active:scale-93 ${
+                                    className={`flex size-7.5 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-transparent transition-all hover:bg-mauve-100 active:scale-93 ${
                                       isConnecting
                                         ? "cursor-wait text-red-400"
                                         : "text-red-500 hover:text-emerald-600"
                                     }`}
-                                    title={isConnecting ? "Connecting..." : `Power On • Connect to ${conn.name}`}
+                                    title={
+                                      isConnecting
+                                        ? "Connecting..."
+                                        : `Power On • Connect to ${conn.name}`
+                                    }
                                   >
                                     <Power
                                       size={14}
-                                      className={isConnecting ? "animate-pulse" : ""}
+                                      className={
+                                        isConnecting ? "animate-pulse" : ""
+                                      }
                                     />
                                   </button>
                                 </div>
@@ -1384,14 +1223,14 @@ export function App() {
                     </>
                   ) : (
                     <div className="flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white p-8 text-center shadow-2xs sm:p-12">
-                      <div className="mb-3.5 flex size-13 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-600 shadow-xs">
-                        <Server size={24} className="text-red-600" />
+                      <div className="mb-3.5 flex size-13 items-center justify-center rounded-2xl border border-mauve-200 bg-mauve-50 text-mauve-600 shadow-xs">
+                        <Server size={24} className="text-mauve-600" />
                       </div>
-                      <h3 className="text-base font-semibold text-zinc-900">
+                      <h3 className="text-base font-semibold text-mauve-900">
                         No Connections
                       </h3>
                       <p className="mt-1 max-w-sm text-xs leading-relaxed text-zinc-500">
-                        Get started by creating a new Redis or Valkey
+                        Get started by creating a new Kafka
                         connection, or quickly connect to an instance running on
                         localhost.
                       </p>
@@ -1399,7 +1238,7 @@ export function App() {
                         <Button
                           onClick={handleOpenAdd}
                           size="sm"
-                          className="h-9 cursor-pointer gap-1.5 rounded-lg bg-red-600 px-4 text-xs font-semibold text-white shadow-xs shadow-red-600/15 hover:bg-red-500"
+                          className="h-9 cursor-pointer gap-1.5 rounded-lg bg-mauve-600 px-4 text-xs font-semibold text-white shadow-xs shadow-mauve-600/15 hover:bg-mauve-500"
                         >
                           <Plus size={14} />
                           <span>New Connection</span>
@@ -1409,7 +1248,7 @@ export function App() {
                           disabled={!!connectingId}
                           variant="outline"
                           size="sm"
-                          className={`h-9 cursor-pointer gap-1.5 rounded-lg border-zinc-200 px-3.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 ${
+                          className={`h-9 cursor-pointer gap-1.5 rounded-lg border-zinc-200 px-3.5 text-xs font-medium text-zinc-700 hover:bg-mauve-50 ${
                             connectingId ? "cursor-wait opacity-75" : ""
                           }`}
                         >
@@ -1417,13 +1256,13 @@ export function App() {
                             <>
                               <RefreshCw
                                 size={13.5}
-                                className="animate-spin text-red-600"
+                                className="animate-spin text-mauve-600"
                               />
                               <span>Connecting...</span>
                             </>
                           ) : (
                             <>
-                              <Zap size={13.5} className="text-red-600" />
+                              <Zap size={13.5} className="text-mauve-600" />
                               <span>Connect to Localhost</span>
                             </>
                           )}
@@ -1464,18 +1303,6 @@ export function App() {
         variant="danger"
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTarget(null)}
-      />
-
-      {/* Pub/Sub Active Subscriptions Confirmation Modal */}
-      <ConfirmModal
-        isOpen={!!pendingPubSubAction}
-        title={pendingPubSubAction?.title || "Active Pub/Sub Subscriptions"}
-        description={pendingPubSubAction?.description || ""}
-        confirmText={pendingPubSubAction?.confirmText || "Proceed"}
-        cancelText="Cancel"
-        variant="warning"
-        onConfirm={handleConfirmPubSubAction}
-        onCancel={handleCancelPubSubAction}
       />
     </div>
   );

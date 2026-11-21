@@ -4,11 +4,11 @@
 
 # Kaflow — Native Apache Kafka GUI Desktop Client
 
-A fast, lightweight, open-source native desktop GUI client for **Apache Kafka** on **macOS, Windows, and Linux**. Built with **Go** and **Wails v3** for a small RAM footprint and zero Electron bloat. Same native-first design language as [kaflow](https://github.com/pankaj-kumar34/kaflow) (our Redis client), with a red accent of its own.
+A fast, lightweight, open-source native desktop GUI client for **Apache Kafka** on **macOS, Windows, and Linux**. Built with **Go** and **Wails v3** for a small RAM footprint and zero Electron bloat.
 
 <p>
   <a href="https://github.com/pankaj-kumar34/kaflow/releases/latest">
-    <img src="https://img.shields.io/github/v/release/pankaj-kumar34/kaflow?style=flat-square&color=dc2626&label=Release" alt="Latest Release" />
+    <img src="https://img.shields.io/github/v/release/pankaj-kumar34/kaflow?style=flat-square&color=594c5b&label=Release" alt="Latest Release" />
   </a>
   <a href="https://github.com/pankaj-kumar34/kaflow/actions/workflows/release.yml">
     <img src="https://img.shields.io/github/actions/workflow/status/pankaj-kumar34/kaflow/release.yml?style=flat-square&label=Build" alt="Release Build Status" />
@@ -23,13 +23,13 @@ A fast, lightweight, open-source native desktop GUI client for **Apache Kafka** 
 
 ---
 
-> 🚧 **Status: under active development.** Kaflow currently runs on the kaflow (Redis) service layer while the Kafka backend is being built. See [PLAN.md](./PLAN.md) for the migration roadmap.
+> 🚧 **Status: under active development.** The Kafka backend ([franz-go](https://github.com/twmb/franz-go) + kadm) and frontend remap are in place — see [PLAN.md](./PLAN.md) and [FEATURES.md](./FEATURES.md) for scope and remaining milestones.
 
 ---
 
 ## Why Kaflow?
 
-Most Kafka desktop clients are Electron apps (or web consoles that need a deployed server), eating hundreds of megabytes of RAM. Kaflow takes the native-first approach proven by kaflow:
+Most Kafka desktop clients are Electron apps (or web consoles that need a deployed server), eating hundreds of megabytes of RAM. Kaflow takes a native-first approach:
 
 - **Featherweight Native Performance**: Go backend + **Wails v3** native OS webviews (`WKWebView` on macOS, `WebView2` on Windows, `WebKitGTK` on Linux) — no Chromium, no Node runtime.
 - **Production-Safe by Design**: Environment groups (`Production`, `Staging`, `Development`, `Local`) with color-coded badges and a **Read-Only Mode** per connection to block destructive mutations.
@@ -37,13 +37,12 @@ Most Kafka desktop clients are Electron apps (or web consoles that need a deploy
 - **Built-In SSH Bastion Tunneling**: Pure-Go SSH port forwarding — no external `ssh` binary required.
 - **TLS / mTLS + SASL**: PLAIN, SCRAM, and mTLS client certificates for secure clusters.
 
-## Planned Features
+## Features
 
-- **Topic Explorer**: browse topics and partitions, inspect configs, partition leaders/ISR, and log directory info.
+- **Topic Explorer**: browse, create, and delete topics, inspect and edit topic configs inline, view partition leaders/ISR, and add partitions.
 - **Consumer Group Inspector**: group membership, partition offsets, and lag monitoring with offset reset.
-- **Message Browser & Producer**: tail live messages per topic/partition, inspect keys/values/headers, and produce test records (JSON-friendly raw view).
-- **Interactive Console**: run admin operations with command history and latency metrics.
-- **Broker Diagnostics**: cluster/broker metrics dashboard, controller and under-replicated partition visibility.
+- **Message Browser & Producer**: browse and filter messages by key/value/header, live-tail per topic/partition, copy or export JSON records, and produce test messages.
+- **Cluster Diagnostics**: cluster/broker metrics dashboard, controller and under-replicated partition visibility.
 - **Built-In Auto-Updater**: GitHub-release-backed self-update with progress events.
 
 ## Building from Source
@@ -86,14 +85,12 @@ Press `Cmd + /` (macOS), `Ctrl + /` (Windows/Linux), or `?` anywhere outside tex
 
 | Action                   | macOS            | Windows / Linux   |
 | :----------------------- | :--------------- | :---------------- |
-| **Console (Terminal)**   | `Cmd + 1`        | `Ctrl + 1`        |
-| **Explorer**             | `Cmd + 2`        | `Ctrl + 2`        |
-| **Diagnostics**          | `Cmd + 3`        | `Ctrl + 3`        |
-| **Pub / Sub Debugger**   | `Cmd + 4`        | `Ctrl + 4`        |
+| **Topics**               | `Cmd + 1`        | `Ctrl + 1`        |
+| **Consumer Groups**      | `Cmd + 2`        | `Ctrl + 2`        |
+| **Cluster Dashboard**    | `Cmd + 3`        | `Ctrl + 3`        |
 | **New Connection**       | `Cmd + N`        | `Ctrl + N`        |
 | **Toggle Sidebar**       | `Cmd + B`        | `Ctrl + B`        |
-| **Save Changes**         | `Cmd + S`        | `Ctrl + S`        |
-| **Clear Console Output** | `Cmd + K`        | `Ctrl + K`        |
+| **Save Key Changes**     | `Cmd + S`        | `Ctrl + S`        |
 | **Shortcuts Help**       | `Cmd + /` or `?` | `Ctrl + /` or `?` |
 
 ---
@@ -120,13 +117,13 @@ kaflow/
 ├── backend/
 │   ├── connection/                  # ConnectionManager, TLS & SSH tunnel, credential storage
 │   ├── models/                      # Shared Go structs bound to TypeScript definitions
-│   └── services/                    # Wails RPC services (Connection, Data, Cli, PubSub, Diagnostics, Updater)
+│   └── services/                    # Wails RPC services (Connection, Topic, Message, Tail, Group, Diagnostics, Updater)
 └── frontend/
+    ├── bindings/                    # Auto-generated Wails v3 Go-to-TypeScript bindings
     └── src/
         ├── App.tsx                  # Root workspace layout, connection switching, and keyboard shortcuts
-        ├── bindings/                # Auto-generated Wails v3 Go-to-TypeScript bindings
         ├── components/              # Shared UI primitives, modals, and toasts
-        └── features/                # connections, explorer, editors, terminal, pubsub, diagnostics
+        └── features/                # cluster, connections, editors, groups, topics
 ```
 
 ---

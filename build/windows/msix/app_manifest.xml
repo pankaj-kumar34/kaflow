@@ -16,7 +16,7 @@
   <Properties>
     <DisplayName>kaflow</DisplayName>
     <PublisherDisplayName>My Company</PublisherDisplayName>
-    <Description>Native Desktop Client for Redis, Valkey &amp; In-Memory Databases</Description>
+    <Description>Native Desktop Client for Apache Kafka</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   
@@ -32,7 +32,7 @@
     <Application Id="com.example.kaflow" Executable="kaflow" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="kaflow"
-        Description="Native Desktop Client for Redis, Valkey &amp; In-Memory Databases"
+        Description="Native Desktop Client for Apache Kafka"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

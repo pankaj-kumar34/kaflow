@@ -8,7 +8,7 @@ info:
   companyName: "Pankaj Kumar" # The name of the company
   productName: "Kaflow" # The name of the application
   productIdentifier: "com.pankajkumar.kaflow" # The unique product identifier
-  description: "Native Desktop Client for Redis, Valkey & In-Memory Databases" # The application description
+  description: "Native Desktop Client for Apache Kafka" # The application description
   copyright: "(c) 2026, Pankaj Kumar" # Copyright text
   comments: "Kaflow Desktop Client" # Comments
   version: "1.0.0" # The application version

@@ -3,7 +3,6 @@ package main
 import (
 	"embed"
 	"log"
-	"time"
 
 	"kaflow/backend/connection"
 	"kaflow/backend/models"
@@ -16,10 +15,7 @@ import (
 var assets embed.FS
 
 func init() {
-	application.RegisterEvent[string]("time")
-	application.RegisterEvent[services.PubSubMessage]("pubsub:message")
-	application.RegisterEvent[models.MonitorEvent]("monitor:event")
-	application.RegisterEvent[string]("monitor:stopped")
+	application.RegisterEvent[models.MessageEvent]("kaflow:message")
 	application.RegisterEvent[models.UpdateProgress]("updater:progress")
 	application.RegisterEvent[string]("nav:tab")
 	application.RegisterEvent[string]("nav:toggle-sidebar")
@@ -30,12 +26,12 @@ func init() {
 func main() {
 	connMgr := connection.NewConnectionManager()
 	connService := services.NewConnectionService(connMgr)
-	keyService := services.NewKeyService(connMgr)
-	dataService := services.NewDataService(connMgr)
-	cliService := services.NewCliService(connMgr)
+	topicService := services.NewTopicService(connMgr)
+	messageService := services.NewMessageService(connMgr)
+	groupService := services.NewGroupService(connMgr)
 	diagService := services.NewDiagnosticsService(connMgr)
-	pubsubService := services.NewPubSubService(connMgr)
-	monitorService := services.NewMonitorService(connMgr)
+	tailService := services.NewTailService(connMgr)
+	connMgr.OnDisconnect = func(id string) { _ = tailService.StopTail(id) }
 	updaterService := services.NewUpdaterService()
 
 	var app *application.App
@@ -43,77 +39,47 @@ func main() {
 	keyBindings := map[string]func(window application.Window){
 		"cmdorctrl+1": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "terminal")
+				app.Event.Emit("nav:tab", "topics")
 			}
 		},
 		"cmdorctrl+2": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "explorer")
+				app.Event.Emit("nav:tab", "groups")
 			}
 		},
 		"cmdorctrl+3": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "diagnostics")
-			}
-		},
-		"cmdorctrl+4": func(window application.Window) {
-			if app != nil {
-				app.Event.Emit("nav:tab", "pubsub")
+				app.Event.Emit("nav:tab", "cluster")
 			}
 		},
 		"ctrl+1": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "terminal")
+				app.Event.Emit("nav:tab", "topics")
 			}
 		},
 		"ctrl+2": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "explorer")
+				app.Event.Emit("nav:tab", "groups")
 			}
 		},
 		"ctrl+3": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "diagnostics")
-			}
-		},
-		"ctrl+4": func(window application.Window) {
-			if app != nil {
-				app.Event.Emit("nav:tab", "pubsub")
+				app.Event.Emit("nav:tab", "cluster")
 			}
 		},
 		"option+1": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "terminal")
+				app.Event.Emit("nav:tab", "topics")
 			}
 		},
 		"option+2": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "explorer")
+				app.Event.Emit("nav:tab", "groups")
 			}
 		},
 		"option+3": func(window application.Window) {
 			if app != nil {
-				app.Event.Emit("nav:tab", "diagnostics")
-			}
-		},
-		"option+4": func(window application.Window) {
-			if app != nil {
-				app.Event.Emit("nav:tab", "pubsub")
-			}
-		},
-		"cmdorctrl+5": func(window application.Window) {
-			if app != nil {
-				app.Event.Emit("nav:tab", "monitor")
-			}
-		},
-		"ctrl+5": func(window application.Window) {
-			if app != nil {
-				app.Event.Emit("nav:tab", "monitor")
-			}
-		},
-		"option+5": func(window application.Window) {
-			if app != nil {
-				app.Event.Emit("nav:tab", "monitor")
+				app.Event.Emit("nav:tab", "cluster")
 			}
 		},
 		"cmdorctrl+b": func(window application.Window) {
@@ -140,15 +106,14 @@ func main() {
 
 	app = application.New(application.Options{
 		Name:        "Kaflow",
-		Description: "Native Desktop Client for Redis, Valkey & In-Memory Databases",
+		Description: "Native Desktop Client for Apache Kafka",
 		Services: []application.Service{
 			application.NewService(connService),
-			application.NewService(keyService),
-			application.NewService(dataService),
-			application.NewService(cliService),
+			application.NewService(topicService),
+			application.NewService(messageService),
+			application.NewService(groupService),
 			application.NewService(diagService),
-			application.NewService(pubsubService),
-			application.NewService(monitorService),
+			application.NewService(tailService),
 			application.NewService(updaterService),
 		},
 		Assets: application.AssetOptions{
@@ -173,14 +138,6 @@ func main() {
 		URL:              "/",
 		KeyBindings:      keyBindings,
 	})
-
-	go func() {
-		for {
-			now := time.Now().Format(time.RFC1123)
-			app.Event.Emit("time", now)
-			time.Sleep(time.Second)
-		}
-	}()
 
 	err := app.Run()
 	if err != nil {

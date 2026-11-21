@@ -1,0 +1,237 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/twmb/franz-go/pkg/kadm"
+	"kaflow/backend/connection"
+	"kaflow/backend/models"
+)
+
+// TopicService exposes topic management (list/describe/configs/create/alter/delete) to the frontend.
+type TopicService struct {
+	mgr *connection.ConnectionManager
+}
+
+// NewTopicService creates a new TopicService.
+func NewTopicService(mgr *connection.ConnectionManager) *TopicService {
+	return &TopicService{mgr: mgr}
+}
+
+// topicInfoFromDetail converts a kadm topic detail (with partition info) to a model.
+func topicInfoFromDetail(td kadm.TopicDetail) models.TopicInfo {
+	info := models.TopicInfo{
+		Name:     td.Topic,
+		Internal: td.IsInternal,
+	}
+	if td.Err != nil {
+		return info
+	}
+
+	info.Partitions = len(td.Partitions)
+	if info.Partitions > 0 {
+		// replication factor is taken from the first partition (all partitions match by default)
+		p0 := td.Partitions[0]
+		info.ReplicationFactor = len(p0.Replicas)
+	}
+
+	for _, p := range td.Partitions.Sorted() {
+		if p.Err != nil {
+			continue
+		}
+		info.PartitionDetails = append(info.PartitionDetails, models.PartitionInfo{
+			Id:              p.Partition,
+			Leader:          p.Leader,
+			Replicas:        p.Replicas,
+			Isr:             p.ISR,
+			OfflineReplicas: p.OfflineReplicas,
+		})
+	}
+	return info
+}
+
+// ListTopics returns all non-internal topics in the cluster.
+func (s *TopicService) ListTopics(connId string) ([]models.TopicInfo, error) {
+	mc, err := s.mgr.GetClient(connId)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	meta, err := mc.Admin.Metadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load topic metadata: %w", err)
+	}
+
+	topics := make([]models.TopicInfo, 0, len(meta.Topics))
+	for _, td := range meta.Topics.Sorted() {
+		if td.IsInternal {
+			continue
+		}
+		topics = append(topics, topicInfoFromDetail(td))
+	}
+	return topics, nil
+}
+
+// GetTopicDetails describes one topic: partition layout plus effective configs.
+func (s *TopicService) GetTopicDetails(connId string, topic string) (*models.TopicInfo, error) {
+	mc, err := s.mgr.GetClient(connId)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	meta, err := mc.Admin.Metadata(ctx, topic)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load topic metadata: %w", err)
+	}
+	td, ok := meta.Topics[topic]
+	if !ok {
+		return nil, fmt.Errorf("topic %s not found", topic)
+	}
+
+	info := topicInfoFromDetail(td)
+
+	// Attach high/low watermarks per partition
+	if ends, err := mc.Admin.ListEndOffsets(ctx, topic); err == nil {
+		starts, startErr := mc.Admin.ListStartOffsets(ctx, topic)
+		for i := range info.PartitionDetails {
+			p := &info.PartitionDetails[i]
+			if lo, ok := ends.Lookup(topic, p.Id); ok && lo.Err == nil {
+				p.LogEndOffset = lo.Offset
+			}
+			if startErr == nil {
+				if lo, ok := starts.Lookup(topic, p.Id); ok && lo.Err == nil {
+					p.LogStartOffset = lo.Offset
+				}
+			}
+		}
+	}
+
+	// Attach configs (non-sensitive values only)
+	res, err := mc.Admin.DescribeTopicConfigs(ctx, topic)
+	if err == nil && len(res) > 0 && res[0].Err == nil {
+		info.Configs = make(map[string]string, len(res[0].Configs))
+		for _, cfg := range res[0].Configs {
+			if cfg.Sensitive {
+				continue
+			}
+			info.Configs[cfg.Key] = cfg.MaybeValue()
+		}
+	}
+
+	return &info, nil
+}
+
+// CreateTopic creates a new topic with the given partition count, replication
+// factor and optional configs.
+func (s *TopicService) CreateTopic(connId string, name string, partitions int32, replicationFactor int16, configs map[string]string) error {
+	mc, err := s.mgr.GetClient(connId)
+	if err != nil {
+		return err
+	}
+	if mc.Config.ReadOnly {
+		return fmt.Errorf("connection is in read-only mode")
+	}
+	if name == "" {
+		return fmt.Errorf("topic name is required")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cfgPtrs := make(map[string]*string, len(configs))
+	for k, v := range configs {
+		val := v
+		cfgPtrs[k] = &val
+	}
+
+	resp, err := mc.Admin.CreateTopic(ctx, partitions, replicationFactor, cfgPtrs, name)
+	if err != nil {
+		return err
+	}
+	if resp.Err != nil {
+		return resp.Err
+	}
+	return nil
+}
+
+// DeleteTopic deletes a topic by name.
+func (s *TopicService) DeleteTopic(connId string, topic string) error {
+	mc, err := s.mgr.GetClient(connId)
+	if err != nil {
+		return err
+	}
+	if mc.Config.ReadOnly {
+		return fmt.Errorf("connection is in read-only mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	resp, err := mc.Admin.DeleteTopic(ctx, topic)
+	if err != nil {
+		return err
+	}
+	if resp.Err != nil {
+		return resp.Err
+	}
+	return nil
+}
+
+// IncreasePartitions adds partitions to an existing topic.
+func (s *TopicService) IncreasePartitions(connId string, topic string, add int32) error {
+	mc, err := s.mgr.GetClient(connId)
+	if err != nil {
+		return err
+	}
+	if mc.Config.ReadOnly {
+		return fmt.Errorf("connection is in read-only mode")
+	}
+	if add <= 0 {
+		return fmt.Errorf("partition count to add must be positive")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	resp, err := mc.Admin.CreatePartitions(ctx, int(add), topic)
+	if err != nil {
+		return err
+	}
+	if resp[topic].Err != nil {
+		return resp[topic].Err
+	}
+	return nil
+}
+
+// UpdateTopicConfig sets a single dynamic topic configuration.
+func (s *TopicService) UpdateTopicConfig(connId string, topic string, key string, value string) error {
+	mc, err := s.mgr.GetClient(connId)
+	if err != nil {
+		return err
+	}
+	if mc.Config.ReadOnly {
+		return fmt.Errorf("connection is in read-only mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	resp, err := mc.Admin.AlterTopicConfigs(ctx, []kadm.AlterConfig{
+		{Op: kadm.SetConfig, Name: key, Value: kadm.StringPtr(value)},
+	}, topic)
+	if err != nil {
+		return err
+	}
+	if _, rerr := resp.On(topic, func(rc *kadm.AlterConfigsResponse) error { return rc.Err }); rerr != nil {
+		return rerr
+	}
+	return nil
+}

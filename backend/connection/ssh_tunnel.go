@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"kaflow/backend/models"
 )
 
@@ -57,10 +59,19 @@ func NewSSHTunnel(cfg models.SshConfig) (*SSHTunnel, error) {
 		return nil, fmt.Errorf("no valid ssh authentication method provided")
 	}
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve home directory for ssh known_hosts: %w", err)
+	}
+	hostKeyCallback, err := knownhosts.New(filepath.Join(home, ".ssh", "known_hosts"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load ssh known_hosts: %w", err)
+	}
+
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         10 * time.Second,
 	}
 

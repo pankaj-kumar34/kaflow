@@ -18,7 +18,7 @@
         PublisherName="CN=My Company"
         PublisherDisplayName="My Company"
         Version="0.1.0.0"
-        PackageDescription="Native Desktop Client for Redis, Valkey &amp; In-Memory Databases">
+        PackageDescription="Native Desktop Client for Apache Kafka">
         <Capabilities>
             <Capability Name="runFullTrust" />
             
@@ -26,7 +26,7 @@
         <Applications>
             <Application
                 Id="com.example.kaflow"
-                Description="Native Desktop Client for Redis, Valkey &amp; In-Memory Databases"
+                Description="Native Desktop Client for Apache Kafka"
                 DisplayName="kaflow"
                 ExecutableName="kaflow"
                 EntryPoint="Windows.FullTrustApplication">
@@ -43,7 +43,7 @@
             <Framework>false</Framework>
             <DisplayName>kaflow</DisplayName>
             <PublisherDisplayName>My Company</PublisherDisplayName>
-            <Description>Native Desktop Client for Redis, Valkey &amp; In-Memory Databases</Description>
+            <Description>Native Desktop Client for Apache Kafka</Description>
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>
     </PackageInformation>

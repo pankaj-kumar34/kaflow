@@ -31,16 +31,11 @@ interface ConnectionProfileProps {
 
 const createDefaultForm = (): ConnectionConfig => ({
   id: "",
-  name: "New Connection",
-  host: "127.0.0.1",
-  port: 6379,
+  name: "New Cluster",
+  seedBrokers: ["localhost:9092"],
   username: "",
   password: "",
-  database: 0,
-  type: "standalone",
-  sentinelMaster: "",
-  sentinelNodes: [],
-  clusterNodes: [],
+  sasl: { mechanism: "" },
   ssh: {
     enabled: false,
     host: "",
@@ -58,6 +53,7 @@ const createDefaultForm = (): ConnectionConfig => ({
     insecureSkipVerify: false,
   },
   readOnly: false,
+  schemaRegistryUrl: "",
   color: "#3b82f6",
   group: "Development",
 });
@@ -82,7 +78,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
 
   const [prevInitialConfig, setPrevInitialConfig] = useState(initialConfig);
   const [form, setForm] = useState<ConnectionConfig>(
-    () => initialConfig ?? createDefaultForm()
+    () => initialConfig ?? createDefaultForm(),
   );
 
   if (initialConfig !== prevInitialConfig) {
@@ -101,25 +97,18 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onBack]);
 
-  const handleHostChange = (newHost: string) => {
-    const isCloudHost =
-      newHost.includes(".databases.appdomain.cloud") ||
-      newHost.includes(".valkey.appdomain.cloud") ||
-      newHost.includes(".cache.amazonaws.com") ||
-      newHost.includes(".redis.cache.windows.net") ||
-      newHost.includes(".upstash.io") ||
-      newHost.includes(".aivencloud.com");
-
-    setForm((prev) => ({
-      ...prev,
-      host: newHost,
-      tls: {
-        ...prev.tls,
-        enabled: prev.tls.enabled || isCloudHost,
-        insecureSkipVerify: isCloudHost ? true : prev.tls.insecureSkipVerify,
-      },
-    }));
+  // Draft text for the bootstrap-servers textarea; null = show normalized form value
+  const [brokersDraft, setBrokersDraft] = useState<string | null>(null);
+  const handleSeedBrokersChange = (raw: string) => {
+    setBrokersDraft(raw);
+    const brokers = raw
+      .split(/[\n,]/)
+      .map((b) => b.trim())
+      .filter(Boolean);
+    setForm((prev) => ({ ...prev, seedBrokers: brokers }));
   };
+
+  const seedBrokersText = form.seedBrokers.join("\n");
 
   const handleTestWithConfig = async (cfg: ConnectionConfig) => {
     setTesting(true);
@@ -133,9 +122,15 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
     } catch (err: unknown) {
       const errStr = getErrorMessage(err);
       const isHttpTls =
-        errStr.includes("HTTP/1.1 400 Bad Request") ||
-        errStr.includes("can't parse map reply") ||
-        errStr.includes("oversized inline request");
+        !cfg.tls.enabled &&
+        (errStr.includes("is TLS missing") ||
+          errStr.includes("requires TLS") ||
+          errStr.includes("closed the connection immediately") ||
+          errStr.includes("EOF") ||
+          errStr.includes("connection reset by peer") ||
+          errStr.includes("broken pipe") ||
+          errStr.includes("HTTP/1.1 400 Bad Request") ||
+          errStr.includes("unable to decode"));
 
       setTestResult({
         success: false,
@@ -175,8 +170,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
         (list || []).find(
           (c) =>
             c.name === cfgToSave.name &&
-            c.host === cfgToSave.host &&
-            c.port === cfgToSave.port,
+            c.seedBrokers.join(",") === cfgToSave.seedBrokers.join(","),
         ) || cfgToSave;
       onSaved(saved);
     } catch (err: unknown) {
@@ -230,24 +224,24 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
   const envBadge = getEnvBadge(form.group);
 
   return (
-    <div className="flex size-full flex-col overflow-hidden bg-[#fafafa] font-sans text-zinc-900 select-none">
+    <div className="flex size-full flex-col overflow-hidden bg-[#fafafa] font-sans text-mauve-900 select-none">
       {/* 1. Single Unified Top Header Action Bar */}
       <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-zinc-200 bg-white px-6 shadow-2xs">
         <div className="flex min-w-0 items-center gap-3.5">
           <button
             onClick={onBack}
-            className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+            className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-mauve-100 hover:text-mauve-900"
             title="Back / Cancel (Esc)"
           >
             <ArrowLeft size={14} />
             <span>Back</span>
           </button>
 
-          <div className="h-5 w-px shrink-0 bg-zinc-200" />
+          <div className="h-5 w-px shrink-0 bg-mauve-200" />
 
           {/* Connection Identity */}
           <div className="flex min-w-0 items-center gap-2.5">
-            <h2 className="truncate text-sm font-bold text-zinc-900 sm:text-base">
+            <h2 className="truncate text-sm font-bold text-mauve-900 sm:text-base">
               {initialConfig
                 ? form.name || "Untitled Connection"
                 : "New Connection"}
@@ -276,7 +270,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
               variant="outline"
               size="sm"
               onClick={() => onDelete(initialConfig.id, form.name)}
-              className="h-8.5 cursor-pointer gap-1.5 border-red-200 bg-red-50/50 px-3 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100"
+              className="h-8.5 cursor-pointer gap-1.5 border-mauve-200 bg-mauve-50/50 px-3 text-xs font-semibold text-mauve-700 transition-colors hover:bg-mauve-100"
               title="Delete Connection"
             >
               <Trash2 size={13} />
@@ -289,11 +283,11 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
             variant="outline"
             size="sm"
             onClick={handleTest}
-            disabled={testing || !form.host.trim()}
-            className="h-8.5 cursor-pointer gap-1.5 border-zinc-200 bg-white px-3.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+            disabled={testing || form.seedBrokers.length === 0}
+            className="h-8.5 cursor-pointer gap-1.5 border-zinc-200 bg-white px-3.5 text-xs font-semibold text-zinc-700 hover:bg-mauve-50"
           >
             {testing ? (
-              <RefreshCw size={13} className="animate-spin text-red-600" />
+              <RefreshCw size={13} className="animate-spin text-mauve-600" />
             ) : (
               <Shield size={13} />
             )}
@@ -306,7 +300,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
             size="sm"
             onClick={handleSave}
             disabled={saving || !form.name.trim()}
-            className="h-8.5 cursor-pointer rounded-lg bg-red-600 px-4 text-xs font-semibold text-white shadow-xs transition-all hover:bg-red-500 active:bg-red-700"
+            className="h-8.5 cursor-pointer rounded-lg bg-mauve-600 px-4 text-xs font-semibold text-white shadow-xs transition-all hover:bg-mauve-500 active:bg-mauve-700"
           >
             {saving ? "Saving..." : "Save Connection"}
           </Button>
@@ -314,34 +308,36 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
       </div>
 
       {/* 2. Subheader Tabs */}
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-zinc-200 bg-zinc-50/80 px-6">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-zinc-200 bg-mauve-50/80 px-6">
         <div className="flex items-center gap-1">
-          {([
-            { id: "general", label: "General", icon: <Server size={14} /> },
-            {
-              id: "ssh",
-              label: "SSH Bastion",
-              icon: <Terminal size={14} />,
-              badge: form.ssh.enabled ? "ON" : null,
-            },
-            {
-              id: "tls",
-              label: "TLS / SSL",
-              icon: <Lock size={14} />,
-              badge: form.tls.enabled ? "ON" : null,
-            },
-            {
-              id: "advanced",
-              label: "Advanced & Safety",
-              icon: <Sliders size={14} />,
-              badge: form.readOnly ? "Read-Only" : null,
-            },
-          ] satisfies Array<{
-            id: "general" | "ssh" | "tls" | "advanced";
-            label: string;
-            icon: React.ReactNode;
-            badge?: string | null;
-          }>).map((tab) => {
+          {(
+            [
+              { id: "general", label: "General", icon: <Server size={14} /> },
+              {
+                id: "ssh",
+                label: "SSH Bastion",
+                icon: <Terminal size={14} />,
+                badge: form.ssh.enabled ? "ON" : null,
+              },
+              {
+                id: "tls",
+                label: "TLS / SSL",
+                icon: <Lock size={14} />,
+                badge: form.tls.enabled ? "ON" : null,
+              },
+              {
+                id: "advanced",
+                label: "Advanced & Safety",
+                icon: <Sliders size={14} />,
+                badge: form.readOnly ? "Read-Only" : null,
+              },
+            ] satisfies Array<{
+              id: "general" | "ssh" | "tls" | "advanced";
+              label: string;
+              icon: React.ReactNode;
+              badge?: string | null;
+            }>
+          ).map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
@@ -349,8 +345,8 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex cursor-pointer items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
                   isActive
-                    ? "border border-zinc-200 bg-white font-semibold text-zinc-900 shadow-2xs"
-                    : "text-zinc-500 hover:bg-white/50 hover:text-zinc-800"
+                    ? "border border-zinc-200 bg-white font-semibold text-mauve-900 shadow-2xs"
+                    : "text-zinc-500 hover:bg-white/50 hover:text-mauve-800"
                 }`}
               >
                 {tab.icon}
@@ -438,7 +434,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
               {/* Primary Identity Card */}
               <div className="space-y-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xs">
                 <div className="border-b border-zinc-100 pb-3">
-                  <h3 className="text-sm font-bold tracking-tight text-zinc-900">
+                  <h3 className="text-sm font-bold tracking-tight text-mauve-900">
                     Identity & Environment
                   </h3>
                   <p className="mt-0.5 text-xs text-zinc-500">
@@ -457,8 +453,8 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                       onChange={(e) =>
                         setForm({ ...form, name: e.target.value })
                       }
-                      placeholder="e.g. Production Cluster or Local Redis"
-                      className="h-10 border-zinc-200 bg-white text-sm text-zinc-900 focus-visible:border-red-500"
+                      placeholder="e.g. Production Cluster or Local Kafka"
+                      className="h-10 border-zinc-200 bg-white text-sm text-mauve-900 focus-visible:border-mauve-500"
                     />
                   </div>
 
@@ -495,7 +491,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                             readOnly: nextReadOnly,
                           });
                         }}
-                        className="flex h-10 w-full cursor-pointer rounded-lg border border-zinc-200 bg-white py-2 pr-9 pl-3.5 font-sans text-sm text-zinc-900 shadow-2xs transition-all focus:border-red-500 focus:outline-none"
+                        className="flex h-10 w-full cursor-pointer rounded-lg border border-zinc-200 bg-white py-2 pr-9 pl-3.5 font-sans text-sm text-mauve-900 shadow-2xs transition-all focus:border-mauve-500 focus:outline-none"
                       >
                         <option value="Production">Production</option>
                         <option value="Staging">Staging</option>
@@ -520,126 +516,102 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
               {/* Endpoint & Network Card */}
               <div className="space-y-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xs">
                 <div className="border-b border-zinc-100 pb-3">
-                  <h3 className="text-sm font-bold tracking-tight text-zinc-900">
-                    Endpoint & Topology
+                  <h3 className="text-sm font-bold tracking-tight text-mauve-900">
+                    Bootstrap Servers
                   </h3>
                   <p className="mt-0.5 text-xs text-zinc-500">
-                    Connection hostname, listening port, and cluster routing
-                    modes.
+                    One or more seed brokers (host:port). The client discovers
+                    the full cluster from these.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-[3fr_1fr]">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-zinc-700">
-                      Host / Endpoint
-                    </label>
-                    <Input
-                      type="text"
-                      value={form.host}
-                      onChange={(e) => handleHostChange(e.target.value)}
-                      placeholder="127.0.0.1 or my-cloud.valkey.eu-gb.databases.appdomain.cloud"
-                      className="h-10 border-zinc-200 bg-white text-sm text-zinc-900 focus-visible:border-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-zinc-700">
-                      Port
-                    </label>
-                    <Input
-                      type="number"
-                      value={form.port}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          port: parseInt(e.target.value) || 6379,
-                        })
-                      }
-                      className="h-10 border-zinc-200 bg-white text-sm text-zinc-900 focus-visible:border-red-500"
-                    />
-                  </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-zinc-700">
+                    Seed Brokers
+                  </label>
+                  <textarea
+                    value={brokersDraft ?? seedBrokersText}
+                    onChange={(e) => handleSeedBrokersChange(e.target.value)}
+                    onBlur={() => setBrokersDraft(null)}
+                    rows={3}
+                    spellCheck={false}
+                    placeholder={"broker-1:9092\nbroker-2:9092"}
+                    className="w-full resize-none rounded-lg border border-zinc-200 bg-white p-3 font-mono text-sm text-mauve-900 shadow-2xs transition-all placeholder:text-zinc-400 focus:border-mauve-500 focus:outline-none"
+                  />
+                  <p className="mt-1.5 text-[11px] text-zinc-400">
+                    Comma or newline separated. Default port 9092 is applied
+                    automatically when omitted.
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-[1.5fr_1fr]">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-zinc-700">
-                      Cluster / Topology Mode
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={form.type}
-                        onChange={(e) => {
-                          const newType = e.target.value;
-                          setForm({
-                            ...form,
-                            type: newType,
-                            database: newType === "cluster" ? 0 : form.database,
-                          });
-                        }}
-                        className="flex h-10 w-full cursor-pointer rounded-lg border border-zinc-200 bg-white py-2 pr-9 pl-3.5 font-sans text-sm text-zinc-900 shadow-2xs transition-all focus:border-red-500 focus:outline-none"
-                      >
-                        <option value="standalone">Standalone</option>
-                        <option value="cluster">Cluster</option>
-                        <option value="sentinel">Sentinel</option>
-                      </select>
-                      <ChevronDown
-                        size={14}
-                        className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-zinc-400"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-zinc-700">
-                      Default Database
-                    </label>
-                    <div className="relative">
-                      <select
-                        disabled={form.type === "cluster"}
-                        value={form.type === "cluster" ? 0 : form.database}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            database: parseInt(e.target.value, 10) || 0,
-                          })
-                        }
-                        className={`flex h-10 w-full cursor-pointer rounded-lg border border-zinc-200 bg-white py-2 pr-9 pl-3.5 font-sans text-sm text-zinc-900 shadow-2xs transition-all focus:border-red-500 focus:outline-none ${
-                          form.type === "cluster"
-                            ? "cursor-not-allowed bg-zinc-50 opacity-40"
-                            : ""
-                        }`}
-                      >
-                        {Array.from({ length: 16 }).map((_, i) => (
-                          <option key={i} value={i}>
-                            DB {i}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={14}
-                        className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-zinc-400"
-                      />
-                    </div>
-                  </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-zinc-700">
+                    Schema Registry URL{" "}
+                    <span className="font-normal text-zinc-400">(optional)</span>
+                  </label>
+                  <Input
+                    type="text"
+                    value={form.schemaRegistryUrl ?? ""}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        schemaRegistryUrl: e.target.value,
+                      }))
+                    }
+                    spellCheck={false}
+                    placeholder="http://localhost:8081"
+                    className="font-mono text-sm"
+                  />
                 </div>
               </div>
 
               {/* Authentication Card */}
               <div className="space-y-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xs">
                 <div className="border-b border-zinc-100 pb-3">
-                  <h3 className="text-sm font-bold tracking-tight text-zinc-900">
-                    Authentication Credentials
+                  <h3 className="text-sm font-bold tracking-tight text-mauve-900">
+                    Authentication
                   </h3>
                   <p className="mt-0.5 text-xs text-zinc-500">
-                    Standard AUTH password or Redis 6+ ACL username.
+                    SASL credentials. Leave mechanism empty for clusters
+                    without authentication.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-zinc-700">
+                      SASL Mechanism
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={form.sasl?.mechanism || ""}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            sasl: { mechanism: e.target.value },
+                          })
+                        }
+                        className="flex h-10 w-full cursor-pointer rounded-lg border border-zinc-200 bg-white py-2 pr-9 pl-3.5 font-sans text-sm text-mauve-900 shadow-2xs transition-all focus:border-mauve-500 focus:outline-none"
+                      >
+                        <option value="">None</option>
+                        <option value="PLAIN">PLAIN</option>
+                        <option value="SCRAM-SHA-256">SCRAM-SHA-256</option>
+                        <option value="SCRAM-SHA-512">SCRAM-SHA-512</option>
+                        <option value="OAUTHBEARER">
+                          OAUTHBEARER (token as password)
+                        </option>
+                      </select>
+                      <ChevronDown
+                        size={14}
+                        className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-zinc-400"
+                      />
+                    </div>
+                  </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-zinc-700">
                       Username{" "}
                       <span className="font-normal text-zinc-400">
-                        (Optional ACL)
+                        (SASL user)
                       </span>
                     </label>
                     <Input
@@ -648,8 +620,8 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                       onChange={(e) =>
                         setForm({ ...form, username: e.target.value })
                       }
-                      placeholder="default or cloud_user..."
-                      className="h-10 border-zinc-200 bg-white text-sm text-zinc-900 focus-visible:border-red-500"
+                      placeholder="SASL username"
+                      className="h-10 border-zinc-200 bg-white text-sm text-mauve-900 focus-visible:border-mauve-500"
                     />
                   </div>
                   <div>
@@ -662,8 +634,8 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                       onChange={(e) =>
                         setForm({ ...form, password: e.target.value })
                       }
-                      placeholder="Auth secret or access key"
-                      className="h-10 border-zinc-200 bg-white text-sm text-zinc-900 focus-visible:border-red-500"
+                      placeholder="SASL secret or bearer token"
+                      className="h-10 border-zinc-200 bg-white text-sm text-mauve-900 focus-visible:border-mauve-500"
                     />
                   </div>
                 </div>
@@ -693,7 +665,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                       }))
                     }
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      form.ssh.enabled ? "bg-red-600" : "bg-zinc-300"
+                      form.ssh.enabled ? "bg-mauve-600" : "bg-mauve-300"
                     }`}
                   >
                     <span
@@ -703,7 +675,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                     />
                   </button>
                   <div>
-                    <span className="flex items-center gap-2 text-sm font-bold text-zinc-900">
+                    <span className="flex items-center gap-2 text-sm font-bold text-mauve-900">
                       <Terminal
                         size={15}
                         className={
@@ -713,7 +685,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                       Enable SSH Bastion Tunnel Forwarding
                     </span>
                     <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
-                      Connects to a private Redis server inside an isolated VPC
+                      Connects to brokers inside an isolated VPC
                       or corporate network via an intermediary SSH jump host.
                     </p>
                   </div>
@@ -723,7 +695,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
               {form.ssh.enabled && (
                 <div className="space-y-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xs">
                   <div className="border-b border-zinc-100 pb-3">
-                    <h3 className="text-sm font-bold tracking-tight text-zinc-900">
+                    <h3 className="text-sm font-bold tracking-tight text-mauve-900">
                       Bastion Server Settings
                     </h3>
                     <p className="mt-0.5 text-xs text-zinc-500">
@@ -746,7 +718,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                           })
                         }
                         placeholder="bastion.vpc.internal or 10.0.0.5"
-                        className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                        className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                       />
                     </div>
                     <div>
@@ -765,7 +737,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                             },
                           })
                         }
-                        className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                        className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                       />
                     </div>
                   </div>
@@ -785,7 +757,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                           })
                         }
                         placeholder="ubuntu or ec2-user"
-                        className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                        className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                       />
                     </div>
                     <div>
@@ -802,7 +774,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                           })
                         }
                         placeholder="Password if not using private key"
-                        className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                        className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                       />
                     </div>
                   </div>
@@ -822,7 +794,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                           })
                         }
                         placeholder="~/.ssh/id_rsa or /Users/name/.ssh/bastion.pem"
-                        className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                        className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                       />
                     </div>
                     <div>
@@ -839,7 +811,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                           })
                         }
                         placeholder="Optional"
-                        className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                        className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                       />
                     </div>
                   </div>
@@ -870,7 +842,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                       }))
                     }
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      form.tls.enabled ? "bg-red-600" : "bg-zinc-300"
+                      form.tls.enabled ? "bg-mauve-600" : "bg-mauve-300"
                     }`}
                   >
                     <span
@@ -880,7 +852,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                     />
                   </button>
                   <div>
-                    <span className="flex items-center gap-2 text-sm font-bold text-zinc-900">
+                    <span className="flex items-center gap-2 text-sm font-bold text-mauve-900">
                       <Lock
                         size={15}
                         className={
@@ -901,7 +873,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
 
               {form.tls.enabled && (
                 <div className="space-y-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xs">
-                  <div className="space-y-1 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                  <div className="space-y-1 rounded-xl border border-zinc-200 bg-mauve-50 p-4">
                     <div className="flex items-center gap-3">
                       <div
                         onClick={() =>
@@ -915,7 +887,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                         }
                         className={`flex size-4 cursor-pointer items-center justify-center rounded border transition-colors ${
                           form.tls.insecureSkipVerify
-                            ? "border-red-600 bg-red-600 text-white"
+                            ? "border-mauve-600 bg-mauve-600 text-white"
                             : "border-zinc-300 bg-white hover:border-zinc-400"
                         }`}
                       >
@@ -933,7 +905,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                             },
                           }))
                         }
-                        className="cursor-pointer text-sm font-semibold text-zinc-900 select-none"
+                        className="cursor-pointer text-sm font-semibold text-mauve-900 select-none"
                       >
                         Skip TLS certificate verification (Insecure / Internal
                         CA)
@@ -960,7 +932,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                         })
                       }
                       placeholder="/path/to/ca.crt or paste certificate PEM string"
-                      className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                      className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                     />
                   </div>
 
@@ -979,7 +951,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                           })
                         }
                         placeholder="/path/to/client.crt"
-                        className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                        className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                       />
                     </div>
                     <div>
@@ -996,7 +968,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                           })
                         }
                         placeholder="/path/to/client.key"
-                        className="h-10 border-zinc-200 bg-white text-sm text-zinc-900"
+                        className="h-10 border-zinc-200 bg-white text-sm text-mauve-900"
                       />
                     </div>
                   </div>
@@ -1025,7 +997,7 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                       setForm((prev) => ({ ...prev, readOnly: !prev.readOnly }))
                     }
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      form.readOnly ? "bg-red-600" : "bg-zinc-300"
+                      form.readOnly ? "bg-mauve-600" : "bg-mauve-300"
                     }`}
                   >
                     <span

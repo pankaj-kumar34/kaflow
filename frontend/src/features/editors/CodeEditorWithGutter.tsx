@@ -11,7 +11,15 @@ interface CodeEditorWithGutterProps {
 }
 
 interface Token {
-  type: "text" | "key" | "colon" | "string" | "number" | "boolean" | "null" | "punct";
+  type:
+    | "text"
+    | "key"
+    | "colon"
+    | "string"
+    | "number"
+    | "boolean"
+    | "null"
+    | "punct";
   val: string;
 }
 
@@ -62,7 +70,9 @@ export const CodeEditorWithGutter: React.FC<CodeEditorWithGutterProps> = ({
   }, [autoFocus]);
 
   // Handle Tab key to insert 2 spaces
-  const handleInternalKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleInternalKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement>,
+  ) => {
     if (e.key === "Tab") {
       e.preventDefault();
       const textarea = textareaRef.current;
@@ -91,7 +101,10 @@ export const CodeEditorWithGutter: React.FC<CodeEditorWithGutterProps> = ({
       const tokens: Token[] = [];
       let lastIndex = 0;
       let match: RegExpExecArray | null;
-      const tokenRegex = new RegExp(JSON_TOKEN_REGEX.source, JSON_TOKEN_REGEX.flags);
+      const tokenRegex = new RegExp(
+        JSON_TOKEN_REGEX.source,
+        JSON_TOKEN_REGEX.flags,
+      );
 
       while ((match = tokenRegex.exec(line)) !== null) {
         if (match.index > lastIndex) {
@@ -148,7 +161,7 @@ export const CodeEditorWithGutter: React.FC<CodeEditorWithGutterProps> = ({
       case "punct":
         return "text-zinc-400 font-normal";
       default:
-        return "text-zinc-800";
+        return "text-mauve-800";
     }
   };
 
@@ -157,7 +170,7 @@ export const CodeEditorWithGutter: React.FC<CodeEditorWithGutterProps> = ({
       {/* Line Numbers Gutter */}
       <div
         ref={gutterRef}
-        className="w-11 shrink-0 overflow-hidden border-r border-zinc-200/80 bg-zinc-50/70 py-2 pr-2.5 text-right font-mono text-[11px] text-zinc-400 select-none"
+        className="w-11 shrink-0 overflow-hidden border-r border-zinc-200/80 bg-mauve-50/70 py-2 pr-2.5 text-right font-mono text-[11px] text-zinc-400 select-none"
         style={{ ...EDITOR_STYLE, userSelect: "none" }}
         aria-hidden="true"
       >
@@ -180,7 +193,8 @@ export const CodeEditorWithGutter: React.FC<CodeEditorWithGutterProps> = ({
           >
             {tokenizedLines.map((tokens, idx) => (
               <div key={idx} className="h-5 whitespace-pre">
-                {tokens.length === 0 || (tokens.length === 1 && tokens[0].val === "") ? (
+                {tokens.length === 0 ||
+                (tokens.length === 1 && tokens[0].val === "") ? (
                   <span>&nbsp;</span>
                 ) : (
                   tokens.map((token, tIdx) => (
@@ -204,8 +218,8 @@ export const CodeEditorWithGutter: React.FC<CodeEditorWithGutterProps> = ({
           readOnly={readOnly}
           className={`absolute inset-0 resize-none overflow-auto border-0 p-2 font-mono text-xs leading-5 whitespace-pre outline-none ${
             isJson
-              ? "bg-transparent text-transparent caret-red-600 selection:bg-red-500/20 selection:text-transparent"
-              : "bg-white text-zinc-900 caret-zinc-900"
+              ? "bg-transparent text-transparent caret-mauve-600 selection:bg-mauve-500/20 selection:text-transparent"
+              : "bg-white text-mauve-900 caret-mauve-900"
           }`}
           style={EDITOR_STYLE}
           placeholder={placeholder}

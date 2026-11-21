@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+} from "react";
 import { AlertCircle, CheckCircle, Info, AlertTriangle, X } from "lucide-react";
 
 export type ToastType = "error" | "success" | "warning" | "info";
@@ -21,15 +27,25 @@ interface ToastOptions {
 interface ToastContextType {
   toast: (options: ToastOptions) => void;
   error: (titleOrMessage: string, message?: string, duration?: number) => void;
-  success: (titleOrMessage: string, message?: string, duration?: number) => void;
-  warning: (titleOrMessage: string, message?: string, duration?: number) => void;
+  success: (
+    titleOrMessage: string,
+    message?: string,
+    duration?: number,
+  ) => void;
+  warning: (
+    titleOrMessage: string,
+    message?: string,
+    duration?: number,
+  ) => void;
   info: (titleOrMessage: string, message?: string, duration?: number) => void;
   dismiss: (id: string) => void;
 }
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
-export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const dismiss = useCallback((id: string) => {
@@ -41,7 +57,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setToasts((prev) => [...prev, { id, type, title, message, duration }]);
     },
-    []
+    [],
   );
 
   const error = useCallback(
@@ -54,7 +70,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         duration: duration ?? 6000,
       });
     },
-    [toast]
+    [toast],
   );
 
   const success = useCallback(
@@ -67,7 +83,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         duration: duration ?? 4000,
       });
     },
-    [toast]
+    [toast],
   );
 
   const warning = useCallback(
@@ -80,7 +96,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         duration: duration ?? 5000,
       });
     },
-    [toast]
+    [toast],
   );
 
   const info = useCallback(
@@ -93,11 +109,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         duration: duration ?? 4000,
       });
     },
-    [toast]
+    [toast],
   );
 
   return (
-    <ToastContext.Provider value={{ toast, error, success, warning, info, dismiss }}>
+    <ToastContext.Provider
+      value={{ toast, error, success, warning, info, dismiss }}
+    >
       {children}
       <div
         aria-live="polite"
@@ -120,7 +138,10 @@ export const useToast = () => {
   return context;
 };
 
-const ToastCard: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toast, onClose }) => {
+const ToastCard: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({
+  toast,
+  onClose,
+}) => {
   useEffect(() => {
     if (!toast.duration || toast.duration <= 0) return;
     const timer = setTimeout(() => {
@@ -159,9 +180,11 @@ const ToastCard: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toa
   return (
     <div
       role="alert"
-      className={`pointer-events-auto flex items-start gap-3 rounded-xl border bg-zinc-900/95 p-3.5 text-zinc-100 backdrop-blur-md ${typeConfig.border} shadow-xl ${typeConfig.shadow} transition-all duration-200 animate-in fade-in slide-in-from-bottom-2`}
+      className={`pointer-events-auto flex items-start gap-3 rounded-xl border bg-mauve-950/95 p-3.5 text-zinc-100 backdrop-blur-md ${typeConfig.border} shadow-xl ${typeConfig.shadow} transition-all duration-200 animate-in fade-in slide-in-from-bottom-2`}
     >
-      <div className={`rounded-lg p-1.5 ${typeConfig.accentBg} mt-0.5 shrink-0`}>
+      <div
+        className={`rounded-lg p-1.5 ${typeConfig.accentBg} mt-0.5 shrink-0`}
+      >
         {typeConfig.icon}
       </div>
       <div className="min-w-0 flex-1 pr-1">
@@ -176,7 +199,7 @@ const ToastCard: React.FC<{ toast: ToastMessage; onClose: () => void }> = ({ toa
       </div>
       <button
         onClick={onClose}
-        className="shrink-0 cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
+        className="shrink-0 cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-mauve-800 hover:text-white"
         title="Dismiss"
       >
         <X size={14} />

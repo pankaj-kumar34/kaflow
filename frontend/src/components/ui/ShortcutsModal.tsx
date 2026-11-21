@@ -47,43 +47,35 @@ const ShortcutsModalContent: React.FC<{
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const categories: ShortcutCategory[] = useMemo(() => [
-    {
-      category: "Global Navigation",
-      items: [
-        { name: "New Connection", keys: [modSymbol, "N"] },
-        { name: "Toggle Sidebar", keys: [modSymbol, "B"] },
-        { name: "Keyboard Shortcuts", keys: [modSymbol, "/"] },
-        { name: "Quick Help", keys: ["?"] },
-      ],
-    },
-    {
-      category: "Workspace Views",
-      items: [
-        { name: "Console (Terminal)", keys: [modSymbol, "1"] },
-        { name: "Explorer", keys: [modSymbol, "2"] },
-        { name: "Diagnostics Dashboard", keys: [modSymbol, "3"] },
-        { name: "Pub / Sub Debugger", keys: [modSymbol, "4"] },
-        { name: "Command Monitor", keys: [modSymbol, "5"] },
-      ],
-    },
-    {
-      category: "Key Editor & Viewer",
-      items: [
-        { name: "Save Key Changes", keys: [modSymbol, "S"] },
-        { name: "Close / Dismiss", keys: ["Esc"] },
-      ],
-    },
-    {
-      category: "Console (Terminal)",
-      items: [
-        { name: "Execute Command", keys: ["Enter"] },
-        { name: "Clear Output", keys: [modSymbol, "K"] },
-        { name: "Command History", keys: ["↑", "↓"] },
-        { name: "Auto-Complete", keys: ["Tab"] },
-      ],
-    },
-  ], [modSymbol]);
+  const categories: ShortcutCategory[] = useMemo(
+    () => [
+      {
+        category: "Global Navigation",
+        items: [
+          { name: "New Connection", keys: [modSymbol, "N"] },
+          { name: "Toggle Sidebar", keys: [modSymbol, "B"] },
+          { name: "Keyboard Shortcuts", keys: [modSymbol, "/"] },
+          { name: "Quick Help", keys: ["?"] },
+        ],
+      },
+      {
+        category: "Workspace Views",
+        items: [
+          { name: "Topics", keys: [modSymbol, "1"] },
+          { name: "Consumer Groups", keys: [modSymbol, "2"] },
+          { name: "Cluster Dashboard", keys: [modSymbol, "3"] },
+        ],
+      },
+      {
+        category: "Key Editor & Viewer",
+        items: [
+          { name: "Save Key Changes", keys: [modSymbol, "S"] },
+          { name: "Close / Dismiss", keys: ["Esc"] },
+        ],
+      },
+    ],
+    [modSymbol],
+  );
 
   const filteredCategories = useMemo(() => {
     if (!search.trim()) return categories;
@@ -94,7 +86,7 @@ const ShortcutsModalContent: React.FC<{
         items: cat.items.filter(
           (item) =>
             item.name.toLowerCase().includes(q) ||
-            item.keys.some((k) => k.toLowerCase().includes(q))
+            item.keys.some((k) => k.toLowerCase().includes(q)),
         ),
       }))
       .filter((cat) => cat.items.length > 0);
@@ -110,13 +102,13 @@ const ShortcutsModalContent: React.FC<{
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-zinc-50/60 p-4 sm:px-5 sm:py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-mauve-50/60 p-4 sm:px-5 sm:py-4">
           <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600 shadow-2xs">
+            <div className="flex size-8 items-center justify-center rounded-lg border border-mauve-200 bg-mauve-50 text-mauve-600 shadow-2xs">
               <Keyboard size={16} />
             </div>
             <div>
-              <h3 className="text-sm leading-tight font-bold text-zinc-900">
+              <h3 className="text-sm leading-tight font-bold text-mauve-900">
                 Keyboard Shortcuts
               </h3>
               <p className="mt-0.5 text-[11px] text-zinc-500">
@@ -126,12 +118,12 @@ const ShortcutsModalContent: React.FC<{
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="rounded border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+            <span className="rounded border border-zinc-200 bg-mauve-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
               {isMac ? "macOS" : "Windows / Linux"}
             </span>
             <button
               onClick={onClose}
-              className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-200/70 hover:text-zinc-700"
+              className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-mauve-200/70 hover:text-zinc-700"
               title="Close (Esc)"
             >
               <X size={15} />
@@ -142,14 +134,17 @@ const ShortcutsModalContent: React.FC<{
         {/* Search Bar */}
         <div className="shrink-0 border-b border-zinc-100 bg-white p-3 sm:px-5">
           <div className="relative flex items-center">
-            <Search size={14} className="pointer-events-none absolute left-3 text-zinc-400" />
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-3 text-zinc-400"
+            />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search shortcuts..."
               autoFocus
-              className="h-8 w-full rounded-lg border border-zinc-200 bg-zinc-50 pr-3 pl-8 text-xs text-zinc-800 placeholder-zinc-400 transition-colors focus:border-red-400 focus:bg-white focus:outline-none"
+              className="h-8 w-full rounded-lg border border-zinc-200 bg-mauve-50 pr-3 pl-8 text-xs text-mauve-800 placeholder-zinc-400 transition-colors focus:border-mauve-400 focus:bg-white focus:outline-none"
             />
           </div>
         </div>
@@ -170,7 +165,7 @@ const ShortcutsModalContent: React.FC<{
                   {cat.items.map((item) => (
                     <div
                       key={item.name}
-                      className="flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/80 px-2.5 py-1.5 transition-colors hover:bg-zinc-100/70"
+                      className="flex items-center justify-between rounded-lg border border-zinc-100 bg-mauve-50/80 px-2.5 py-1.5 transition-colors hover:bg-mauve-100/70"
                     >
                       <span className="mr-2 truncate text-xs font-medium text-zinc-700">
                         {item.name}
@@ -179,7 +174,7 @@ const ShortcutsModalContent: React.FC<{
                         {item.keys.map((k, idx) => (
                           <kbd
                             key={idx}
-                            className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 font-mono text-[11px] font-semibold text-zinc-800 shadow-2xs"
+                            className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 font-mono text-[11px] font-semibold text-mauve-800 shadow-2xs"
                           >
                             {k}
                           </kbd>
@@ -194,7 +189,7 @@ const ShortcutsModalContent: React.FC<{
         </div>
 
         {/* Footer */}
-        <div className="flex shrink-0 items-center justify-between border-t border-zinc-100 bg-zinc-50/60 px-5 py-3 text-xs text-zinc-500">
+        <div className="flex shrink-0 items-center justify-between border-t border-zinc-100 bg-mauve-50/60 px-5 py-3 text-xs text-zinc-500">
           <div className="flex items-center gap-1.5">
             <span>Press</span>
             <kbd className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-zinc-700 shadow-2xs">
@@ -207,7 +202,7 @@ const ShortcutsModalContent: React.FC<{
             variant="outline"
             size="sm"
             onClick={onClose}
-            className="h-8 cursor-pointer border-zinc-200 bg-white px-3.5 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-zinc-100"
+            className="h-8 cursor-pointer border-zinc-200 bg-white px-3.5 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-mauve-100"
           >
             Close
           </Button>

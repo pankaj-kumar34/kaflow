@@ -205,6 +205,7 @@ func (u *UpdaterService) CheckForUpdate() (*models.UpdateCheckResult, error) {
 	hasUpdate := CompareSemver(u.Version, latestVer) < 0
 	asset, canSelfUpdate := matchReleaseAsset(rel.Assets, u.TargetOS, u.TargetArch)
 	checksumURL := findChecksumAssetURL(rel.Assets)
+	canSelfUpdate = canSelfUpdate && checksumURL != ""
 
 	releaseURL := rel.HTMLURL
 	if releaseURL == "" {
@@ -246,8 +247,15 @@ func (u *UpdaterService) DownloadAndInstallUpdate(assetURL string, assetName str
 		return fmt.Errorf("no downloadable update asset URL provided")
 	}
 	parsedURL, err := url.Parse(assetURL)
-	if err != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
-		return fmt.Errorf("invalid asset download URL")
+	if err != nil || parsedURL.Scheme != "https" {
+		return fmt.Errorf("invalid asset download URL (must be https)")
+	}
+	if strings.TrimSpace(checksumURL) == "" {
+		return fmt.Errorf("missing checksum URL for update verification")
+	}
+	parsedChecksumURL, err := url.Parse(strings.TrimSpace(checksumURL))
+	if err != nil || parsedChecksumURL.Scheme != "https" {
+		return fmt.Errorf("invalid checksum URL (must be https)")
 	}
 
 	if assetName == "" {
@@ -391,8 +399,7 @@ func (u *UpdaterService) verifyAssetChecksum(filePath string, assetName string, 
 
 	expectedHash := parseChecksumForAsset(string(body), assetName)
 	if expectedHash == "" {
-		// Asset not listed in checksums file; do not fail if checksums file doesn't list this specific file
-		return nil
+		return fmt.Errorf("no SHA-256 checksum entry found for %s", assetName)
 	}
 
 	actualHash, err := computeFileSHA256(filePath)
