@@ -8,13 +8,13 @@
         AllowPromptForPassword="false">
     </Settings>
     <Installer
-        Path="memspace"
+        Path="kaflow"
         Arguments=""
-        InstallLocation="C:\Program Files\Memspace\Memspace">
+        InstallLocation="C:\Program Files\kaflow\kaflow">
     </Installer>
     <PackageInformation
-        PackageName="Memspace"
-        PackageDisplayName="Memspace"
+        PackageName="kaflow"
+        PackageDisplayName="kaflow"
         PublisherName="CN=My Company"
         PublisherDisplayName="My Company"
         Version="0.1.0.0"
@@ -25,10 +25,10 @@
         </Capabilities>
         <Applications>
             <Application
-                Id="com.example.memspace"
+                Id="com.example.kaflow"
                 Description="Native Desktop Client for Redis, Valkey &amp; In-Memory Databases"
-                DisplayName="Memspace"
-                ExecutableName="memspace"
+                DisplayName="kaflow"
+                ExecutableName="kaflow"
                 EntryPoint="Windows.FullTrustApplication">
                 
             </Application>
@@ -41,13 +41,13 @@
         </Dependencies>
         <Properties>
             <Framework>false</Framework>
-            <DisplayName>Memspace</DisplayName>
+            <DisplayName>kaflow</DisplayName>
             <PublisherDisplayName>My Company</PublisherDisplayName>
             <Description>Native Desktop Client for Redis, Valkey &amp; In-Memory Databases</Description>
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>
     </PackageInformation>
-    <SaveLocation PackagePath="memspace.msix" />
+    <SaveLocation PackagePath="kaflow.msix" />
     <PackageIntegrity>
         <CertificatePath></CertificatePath>
     </PackageIntegrity>

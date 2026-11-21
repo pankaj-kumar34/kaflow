@@ -4,7 +4,7 @@
 
 # Kaflow — Native Apache Kafka GUI Desktop Client
 
-A fast, lightweight, open-source native desktop GUI client for **Apache Kafka** on **macOS, Windows, and Linux**. Built with **Go** and **Wails v3** for a small RAM footprint and zero Electron bloat. Same native-first design language as [Memspace](https://github.com/pankaj-kumar34/memspace) (our Redis client), with a red accent of its own.
+A fast, lightweight, open-source native desktop GUI client for **Apache Kafka** on **macOS, Windows, and Linux**. Built with **Go** and **Wails v3** for a small RAM footprint and zero Electron bloat. Same native-first design language as [kaflow](https://github.com/pankaj-kumar34/kaflow) (our Redis client), with a red accent of its own.
 
 <p>
   <a href="https://github.com/pankaj-kumar34/kaflow/releases/latest">
@@ -23,13 +23,13 @@ A fast, lightweight, open-source native desktop GUI client for **Apache Kafka** 
 
 ---
 
-> 🚧 **Status: under active development.** Kaflow currently runs on the Memspace (Redis) service layer while the Kafka backend is being built. See [PLAN.md](./PLAN.md) for the migration roadmap.
+> 🚧 **Status: under active development.** Kaflow currently runs on the kaflow (Redis) service layer while the Kafka backend is being built. See [PLAN.md](./PLAN.md) for the migration roadmap.
 
 ---
 
 ## Why Kaflow?
 
-Most Kafka desktop clients are Electron apps (or web consoles that need a deployed server), eating hundreds of megabytes of RAM. Kaflow takes the native-first approach proven by Memspace:
+Most Kafka desktop clients are Electron apps (or web consoles that need a deployed server), eating hundreds of megabytes of RAM. Kaflow takes the native-first approach proven by kaflow:
 
 - **Featherweight Native Performance**: Go backend + **Wails v3** native OS webviews (`WKWebView` on macOS, `WebView2` on Windows, `WebKitGTK` on Linux) — no Chromium, no Node runtime.
 - **Production-Safe by Design**: Environment groups (`Production`, `Staging`, `Development`, `Local`) with color-coded badges and a **Read-Only Mode** per connection to block destructive mutations.
@@ -49,6 +49,7 @@ Most Kafka desktop clients are Electron apps (or web consoles that need a deploy
 ## Building from Source
 
 ### Prerequisites
+
 - **Go** `1.26+`
 - **Node.js** `22+` (or `24+`) and `npm`
 - **Wails v3 CLI** (`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`)
@@ -83,31 +84,31 @@ go build -tags production -trimpath -ldflags="-w -s" -o bin/kaflow .
 
 Press `Cmd + /` (macOS), `Ctrl + /` (Windows/Linux), or `?` anywhere outside text inputs to open the searchable **Keyboard Shortcuts** modal.
 
-| Action | macOS | Windows / Linux |
-| :--- | :--- | :--- |
-| **Console (Terminal)** | `Cmd + 1` | `Ctrl + 1` |
-| **Explorer** | `Cmd + 2` | `Ctrl + 2` |
-| **Diagnostics** | `Cmd + 3` | `Ctrl + 3` |
-| **Pub / Sub Debugger** | `Cmd + 4` | `Ctrl + 4` |
-| **New Connection** | `Cmd + N` | `Ctrl + N` |
-| **Toggle Sidebar** | `Cmd + B` | `Ctrl + B` |
-| **Save Changes** | `Cmd + S` | `Ctrl + S` |
-| **Clear Console Output** | `Cmd + K` | `Ctrl + K` |
-| **Shortcuts Help** | `Cmd + /` or `?` | `Ctrl + /` or `?` |
+| Action                   | macOS            | Windows / Linux   |
+| :----------------------- | :--------------- | :---------------- |
+| **Console (Terminal)**   | `Cmd + 1`        | `Ctrl + 1`        |
+| **Explorer**             | `Cmd + 2`        | `Ctrl + 2`        |
+| **Diagnostics**          | `Cmd + 3`        | `Ctrl + 3`        |
+| **Pub / Sub Debugger**   | `Cmd + 4`        | `Ctrl + 4`        |
+| **New Connection**       | `Cmd + N`        | `Ctrl + N`        |
+| **Toggle Sidebar**       | `Cmd + B`        | `Ctrl + B`        |
+| **Save Changes**         | `Cmd + S`        | `Ctrl + S`        |
+| **Clear Console Output** | `Cmd + K`        | `Ctrl + K`        |
+| **Shortcuts Help**       | `Cmd + /` or `?` | `Ctrl + /` or `?` |
 
 ---
 
 ## Architecture & Tech Stack
 
-| Layer | Technology | Role |
-| :--- | :--- | :--- |
-| **Desktop Shell** | [Wails v3](https://v3.wails.io/) (`github.com/wailsapp/wails/v3`) | Native OS WebView windowing, event bus, and Go-to-TypeScript RPC bindings |
-| **Backend Runtime** | Go `1.26` | Non-blocking I/O, goroutines, connection pool management, and binary packaging |
-| **Kafka Client** | [`franz-go`](https://github.com/twmb/franz-go) *(planned)* | Cluster admin, consumer groups, produce/fetch with full protocol support |
-| **SSH Tunneling** | `golang.org/x/crypto/ssh` | Pure-Go SSH bastion port forwarding |
-| **Secret Storage** | [`go-keyring`](https://github.com/zalando/go-keyring) | Native macOS Keychain, Windows Credential Manager, and Linux Secret Service |
-| **Frontend UI** | React 19, TypeScript, Vite, Tailwind CSS v4 | Responsive desktop UI (red accent) with Lucide icons and custom syntax highlighters |
-| **List Virtualization** | `@tanstack/react-virtual` | High-performance scrolling across large topic/message lists |
+| Layer                   | Technology                                                        | Role                                                                                |
+| :---------------------- | :---------------------------------------------------------------- | :---------------------------------------------------------------------------------- |
+| **Desktop Shell**       | [Wails v3](https://v3.wails.io/) (`github.com/wailsapp/wails/v3`) | Native OS WebView windowing, event bus, and Go-to-TypeScript RPC bindings           |
+| **Backend Runtime**     | Go `1.26`                                                         | Non-blocking I/O, goroutines, connection pool management, and binary packaging      |
+| **Kafka Client**        | [`franz-go`](https://github.com/twmb/franz-go) _(planned)_        | Cluster admin, consumer groups, produce/fetch with full protocol support            |
+| **SSH Tunneling**       | `golang.org/x/crypto/ssh`                                         | Pure-Go SSH bastion port forwarding                                                 |
+| **Secret Storage**      | [`go-keyring`](https://github.com/zalando/go-keyring)             | Native macOS Keychain, Windows Credential Manager, and Linux Secret Service         |
+| **Frontend UI**         | React 19, TypeScript, Vite, Tailwind CSS v4                       | Responsive desktop UI (red accent) with Lucide icons and custom syntax highlighters |
+| **List Virtualization** | `@tanstack/react-virtual`                                         | High-performance scrolling across large topic/message lists                         |
 
 ### Repository Layout
 
