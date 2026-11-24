@@ -253,6 +253,15 @@ func (s *MessageService) FetchMessages(connId string, topic string, partition in
 			if err != nil {
 				return nil, err
 			}
+			if end <= start {
+				return &models.FetchResult{
+					Topic:       topic,
+					Partition:   partition,
+					Messages:    []models.MessageRecord{},
+					StartOffset: start,
+					EndOffset:   end,
+				}, nil
+			}
 			fromOffset = max(start, end-int64(limit))
 			assignment, err = s.assignmentFor(ctx, mc, topic, partition, fromOffset)
 			if err != nil {
@@ -269,6 +278,15 @@ func (s *MessageService) FetchMessages(connId string, topic string, partition in
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if len(assignment) == 0 {
+		return &models.FetchResult{
+			Topic:       topic,
+			Partition:   partition,
+			Messages:    []models.MessageRecord{},
+			StartOffset: fromOffset,
+		}, nil
 	}
 
 	s.fetchMu.Lock()
@@ -347,6 +365,11 @@ func (s *MessageService) tailAssignmentAllPartitions(ctx context.Context, mc *co
 		return nil, 0, fmt.Errorf("failed to list end offsets: %w", err)
 	}
 
+	offsets, minFrom := buildTailOffsets(topic, starts, ends, limit)
+	return kadmOffsets(offsets), minFrom, nil
+}
+
+func buildTailOffsets(topic string, starts, ends kadm.ListedOffsets, limit int64) (kadm.Offsets, int64) {
 	offsets := kadm.Offsets{}
 	minFrom := int64(-1)
 	for p, endLo := range ends[topic] {
@@ -357,6 +380,9 @@ func (s *MessageService) tailAssignmentAllPartitions(ctx context.Context, mc *co
 		if startLo, ok := starts.Lookup(topic, p); ok && startLo.Err == nil {
 			pStart = startLo.Offset
 		}
+		if endLo.Offset <= pStart {
+			continue
+		}
 		from := max(pStart, endLo.Offset-limit)
 		offsets.AddOffset(topic, p, from, -1)
 		if minFrom == -1 || from < minFrom {
@@ -366,7 +392,7 @@ func (s *MessageService) tailAssignmentAllPartitions(ctx context.Context, mc *co
 	if minFrom < 0 {
 		minFrom = 0
 	}
-	return kadmOffsets(offsets), minFrom, nil
+	return offsets, minFrom
 }
 
 // assignmentFor builds the partition->offset assignment for a fetch/tail.

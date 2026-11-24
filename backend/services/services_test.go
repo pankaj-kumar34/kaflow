@@ -115,3 +115,52 @@ func TestRecordToModel_CapsAndWireFormat(t *testing.T) {
 	assert.Contains(t, recBin.Value, "Base64:")
 	assert.Contains(t, recBin.Value, "Hex:")
 }
+
+func TestFormatAdminErr(t *testing.T) {
+	base := errors.New("POLICY_VIOLATION")
+	assert.NoError(t, formatAdminErr(nil, "ignored"))
+	assert.Equal(t, base, formatAdminErr(base, ""))
+	err := formatAdminErr(base, "replication factor must be 3")
+	require.ErrorIs(t, err, base)
+	assert.EqualError(t, err, "POLICY_VIOLATION: replication factor must be 3")
+}
+
+func TestPickDefaultRF(t *testing.T) {
+	assert.Equal(t, int16(2), pickDefaultRF(2, 5))
+	assert.Equal(t, int16(1), pickDefaultRF(0, 1))
+	assert.Equal(t, int16(2), pickDefaultRF(0, 2))
+	assert.Equal(t, int16(3), pickDefaultRF(0, 3))
+	assert.Equal(t, int16(3), pickDefaultRF(0, 6))
+	assert.Equal(t, int16(-1), pickDefaultRF(0, 0))
+}
+
+func TestBuildTailOffsets_SkipsEmptyPartitions(t *testing.T) {
+	starts := kadm.ListedOffsets{
+		"t": {
+			0: {Topic: "t", Partition: 0, Offset: 0},
+			1: {Topic: "t", Partition: 1, Offset: 10},
+			2: {Topic: "t", Partition: 2, Offset: 5},
+		},
+	}
+	ends := kadm.ListedOffsets{
+		"t": {
+			0: {Topic: "t", Partition: 0, Offset: 0},  // empty
+			1: {Topic: "t", Partition: 1, Offset: 10}, // empty (compacted/expired)
+			2: {Topic: "t", Partition: 2, Offset: 25}, // has 20 records
+		},
+	}
+	offsets, minFrom := buildTailOffsets("t", starts, ends, 10)
+	assert.Equal(t, int64(15), minFrom)
+	assigned := kadmOffsets(offsets)
+	require.Contains(t, assigned, "t")
+	assert.Len(t, assigned["t"], 1)
+	assert.Contains(t, assigned["t"], int32(2))
+
+	// All partitions empty produces empty assignment (no 15s poll wait)
+	emptyEnds := kadm.ListedOffsets{
+		"t": {0: {Topic: "t", Partition: 0, Offset: 0}},
+	}
+	emptyOffsets, emptyMin := buildTailOffsets("t", starts, emptyEnds, 10)
+	assert.Equal(t, int64(0), emptyMin)
+	assert.Empty(t, kadmOffsets(emptyOffsets))
+}

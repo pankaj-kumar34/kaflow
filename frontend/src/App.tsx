@@ -919,7 +919,6 @@ export function App() {
                     <PanelLeftClose size={16} />
                   )}
                 </button>
-                <Server size={15} className="text-mauve-600" />
                 {activeTab === "topics" && (
                   <FolderTree size={15} className="text-mauve-600" />
                 )}

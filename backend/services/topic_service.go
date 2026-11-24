@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -69,7 +70,7 @@ func (s *TopicService) ListTopics(connId string) ([]models.TopicInfo, error) {
 
 	topics := make([]models.TopicInfo, 0, len(meta.Topics))
 	for _, td := range meta.Topics.Sorted() {
-		if td.IsInternal {
+		if td.IsInternal || td.Err != nil {
 			continue
 		}
 		topics = append(topics, topicInfoFromDetail(td))
@@ -152,14 +153,59 @@ func (s *TopicService) CreateTopic(connId string, name string, partitions int32,
 		cfgPtrs[k] = &val
 	}
 
+	if replicationFactor <= 0 {
+		replicationFactor = resolveDefaultRF(ctx, mc.Admin)
+	}
+
 	resp, err := mc.Admin.CreateTopic(ctx, partitions, replicationFactor, cfgPtrs, name)
-	if err != nil {
-		return err
-	}
 	if resp.Err != nil {
-		return resp.Err
+		return formatAdminErr(resp.Err, resp.ErrMessage)
 	}
-	return nil
+	return err
+}
+
+// resolveDefaultRF turns a non-positive RF into an explicit value because some
+// broker CreateTopicPolicy implementations reject -1.
+func resolveDefaultRF(ctx context.Context, admin *kadm.Client) int16 {
+	meta, err := admin.BrokerMetadata(ctx)
+	if err != nil || len(meta.Brokers) == 0 {
+		return -1
+	}
+	var cfgRF int16
+	brokerID := meta.Brokers[0].NodeID
+	if res, err := admin.DescribeBrokerConfigs(ctx, brokerID); err == nil {
+		if rc, rerr := res.On(strconv.Itoa(int(brokerID)), nil); rerr == nil && rc.Err == nil {
+			for _, c := range rc.Configs {
+				if c.Key == "default.replication.factor" {
+					if v, perr := strconv.ParseInt(c.MaybeValue(), 10, 16); perr == nil && v > 0 {
+						cfgRF = int16(v)
+					}
+					break
+				}
+			}
+		}
+	}
+	return pickDefaultRF(cfgRF, len(meta.Brokers))
+}
+
+func pickDefaultRF(cfgRF int16, brokerCount int) int16 {
+	if cfgRF > 0 {
+		return cfgRF
+	}
+	if brokerCount <= 0 {
+		return -1
+	}
+	if brokerCount > 3 {
+		return 3
+	}
+	return int16(brokerCount)
+}
+
+func formatAdminErr(err error, msg string) error {
+	if err != nil && msg != "" {
+		return fmt.Errorf("%w: %s", err, msg)
+	}
+	return err
 }
 
 // DeleteTopic deletes a topic by name.
@@ -176,13 +222,10 @@ func (s *TopicService) DeleteTopic(connId string, topic string) error {
 	defer cancel()
 
 	resp, err := mc.Admin.DeleteTopic(ctx, topic)
-	if err != nil {
-		return err
-	}
 	if resp.Err != nil {
-		return resp.Err
+		return formatAdminErr(resp.Err, resp.ErrMessage)
 	}
-	return nil
+	return err
 }
 
 // IncreasePartitions adds partitions to an existing topic.
@@ -205,10 +248,7 @@ func (s *TopicService) IncreasePartitions(connId string, topic string, add int32
 	if err != nil {
 		return err
 	}
-	if resp[topic].Err != nil {
-		return resp[topic].Err
-	}
-	return nil
+	return formatAdminErr(resp[topic].Err, resp[topic].ErrMessage)
 }
 
 // UpdateTopicConfig sets a single dynamic topic configuration.

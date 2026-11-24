@@ -104,9 +104,15 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
   const [newTopicName, setNewTopicName] = useState("");
   const [newTopicPartitions, setNewTopicPartitions] = useState("3");
   const [newTopicRF, setNewTopicRF] = useState("");
+  const [newTopicConfigs, setNewTopicConfigs] = useState<{ key: string; value: string }[]>([]);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [deleteTopicName, setDeleteTopicName] = useState<string | null>(null);
   const [growOpen, setGrowOpen] = useState(false);
   const [growCount, setGrowCount] = useState("3");
+  const [growing, setGrowing] = useState(false);
+  const detailsSeqRef = useRef(0);
+  const fetchSeqRef = useRef(0);
 
   const loadTopics = useCallback(async () => {
     setLoadingTopics(true);
@@ -129,7 +135,11 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
 
   const loadDetails = useCallback(
     async (topic: string) => {
+      const seq = ++detailsSeqRef.current;
+      // Invalidate any in-flight message fetch from the previous topic.
+      fetchSeqRef.current += 1;
       setLoadingDetails(true);
+      setLoadingMessages(false);
       setDetails(null);
       setMessages([]);
       setOldestFetched(null);
@@ -138,11 +148,16 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
       setMsgFilter("");
       try {
         const d = await TopicService.GetTopicDetails(connId, topic);
+        if (seq !== detailsSeqRef.current) return;
         setDetails(d);
+        if (d) setLoadingMessages(true);
       } catch (err) {
+        if (seq !== detailsSeqRef.current) return;
         toast.error("Failed to describe topic", getErrorMessage(err));
       } finally {
-        setLoadingDetails(false);
+        if (seq === detailsSeqRef.current) {
+          setLoadingDetails(false);
+        }
       }
     },
     [connId, toast],
@@ -155,6 +170,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
 
   const fetchMessages = useCallback(
     async (topic: string, partition: number, before?: number, pageLimit = MESSAGES_PAGE) => {
+      const seq = ++fetchSeqRef.current;
       setLoadingMessages(true);
       try {
         const from = before ?? -1;
@@ -166,15 +182,19 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
             from,
             pageLimit,
           );
+        if (seq !== fetchSeqRef.current) return;
         setOldestFetched(before !== undefined ? from : (result?.startOffset ?? 0));
         const incoming = result?.messages ?? [];
         setMessages((prev) =>
           before === undefined ? incoming : [...incoming, ...prev],
         );
       } catch (err) {
+        if (seq !== fetchSeqRef.current) return;
         toast.error("Failed to fetch messages", getErrorMessage(err));
       } finally {
-        setLoadingMessages(false);
+        if (seq === fetchSeqRef.current) {
+          setLoadingMessages(false);
+        }
       }
     },
     [connId, toast],
@@ -239,7 +259,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
   }, [connId]);
 
   const produce = async () => {
-    if (!selectedTopic || !produceValue.trim()) return;
+    if (!selectedTopic || !produceValue.trim() || producing) return;
     setProducing(true);
     try {
       await MessageService.ProduceMessage(
@@ -266,37 +286,51 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
 
   const createTopic = async () => {
     const name = newTopicName.trim();
-    if (!name) return;
+    if (!name || creating) return;
+    setCreateError(null);
+    setCreating(true);
     try {
       const rf = newTopicRF.trim() === "" ? -1 : parseInt(newTopicRF, 10) || -1;
+      const configs: Record<string, string> = {};
+      for (const { key, value } of newTopicConfigs) {
+        const k = key.trim();
+        if (k) configs[k] = value.trim();
+      }
       await TopicService.CreateTopic(
         connId,
         name,
         parseInt(newTopicPartitions, 10) || 1,
         rf,
-        {},
+        configs,
       );
       toast.success("Topic created", name);
       setCreateOpen(false);
       setNewTopicName("");
+      setNewTopicConfigs([]);
       loadTopics();
     } catch (err) {
-      toast.error("Create failed", getErrorMessage(err));
+      const msg = getErrorMessage(err);
+      setCreateError(msg);
+      toast.error("Create failed", msg);
+    } finally {
+      setCreating(false);
     }
   };
 
   const deleteTopic = async () => {
-    if (!deleteTopicName) return;
+    const target = deleteTopicName;
+    if (!target) return;
     try {
-      await TopicService.DeleteTopic(connId, deleteTopicName);
-      toast.success("Topic deleted", deleteTopicName);
-      if (selectedTopic === deleteTopicName) {
+      await TopicService.DeleteTopic(connId, target);
+      toast.success("Topic deleted", target);
+      // Remove immediately: Kafka topic deletion is async on brokers, so an immediate ListTopics often still returns it.
+      setTopics((prev) => prev.filter((t) => t.name !== target));
+      if (selectedTopic === target) {
         stopTail();
         setSelectedTopic(null);
         setDetails(null);
         setMessages([]);
       }
-      loadTopics();
     } catch (err) {
       toast.error("Delete failed", getErrorMessage(err));
     } finally {
@@ -305,7 +339,8 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
   };
 
   const growPartitions = async () => {
-    if (!selectedTopic) return;
+    if (!selectedTopic || growing) return;
+    setGrowing(true);
     try {
       const current = details?.partitions ?? 1;
       const target = parseInt(growCount, 10) || current;
@@ -323,6 +358,8 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
       loadDetails(selectedTopic);
     } catch (err) {
       toast.error("Failed to add partitions", getErrorMessage(err));
+    } finally {
+      setGrowing(false);
     }
   };
 
@@ -345,7 +382,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
     : messages;
 
   const saveTopicConfig = async () => {
-    if (!selectedTopic || !editingConfigKey) return;
+    if (!selectedTopic || !editingConfigKey || savingConfig) return;
     setSavingConfig(true);
     try {
       await TopicService.UpdateTopicConfig(
@@ -413,7 +450,10 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
             </button>
             {!readOnly && (
               <button
-                onClick={() => setCreateOpen(true)}
+                onClick={() => {
+                  setCreateError(null);
+                  setCreateOpen(true);
+                }}
                 className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-mauve-100 hover:text-mauve-700"
                 title="Create topic"
               >
@@ -760,7 +800,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {visibleMessages.length === 0 ? (
                   <div className="flex size-full flex-col items-center justify-center gap-2 px-4 text-center">
-                    {loadingMessages && messages.length === 0 ? (
+                    {(loadingMessages || loadingDetails) && messages.length === 0 ? (
                       <>
                         <Loader2 size={20} className="animate-spin text-mauve-500" />
                         <p className="text-xs text-zinc-400">Loading messages…</p>
@@ -903,7 +943,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setProduceOpen(false)}>
+              <Button variant="outline" size="sm" onClick={() => setProduceOpen(false)} disabled={producing}>
                 Cancel
               </Button>
               <Button
@@ -955,19 +995,88 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
                   />
                 </div>
               </div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-zinc-600">
+                    Configs (optional)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setNewTopicConfigs((prev) => [...prev, { key: "", value: "" }])
+                    }
+                    className="flex items-center gap-1 text-xs font-medium text-mauve-600 hover:text-mauve-800"
+                  >
+                    <Plus size={12} />
+                    Add config
+                  </button>
+                </div>
+                {newTopicConfigs.length > 0 && (
+                  <div className="mt-1.5 max-h-32 space-y-1.5 overflow-y-auto">
+                    {newTopicConfigs.map((cfg, idx) => (
+                      <div key={idx} className="flex items-center gap-1.5">
+                        <input
+                          value={cfg.key}
+                          onChange={(e) =>
+                            setNewTopicConfigs((prev) =>
+                              prev.map((item, i) =>
+                                i === idx ? { ...item, key: e.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="retention.ms"
+                          className="h-7 w-1/2 rounded-lg border border-zinc-200 px-2 font-mono text-xs outline-none focus:border-mauve-400"
+                        />
+                        <input
+                          value={cfg.value}
+                          onChange={(e) =>
+                            setNewTopicConfigs((prev) =>
+                              prev.map((item, i) =>
+                                i === idx ? { ...item, value: e.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="604800000"
+                          className="h-7 w-1/2 rounded-lg border border-zinc-200 px-2 font-mono text-xs outline-none focus:border-mauve-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewTopicConfigs((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                          aria-label="Remove config"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {createError && (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 font-mono text-xs text-red-700 break-words">
+                  {createError}
+                </p>
+              )}
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCreateOpen(false)}
+                disabled={creating}
+              >
                 Cancel
               </Button>
               <Button
                 variant="default"
                 size="sm"
                 onClick={createTopic}
-                disabled={!newTopicName.trim()}
+                disabled={creating || !newTopicName.trim()}
               >
-                <Plus size={13} />
-                Create
+                {creating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                {creating ? "Creating..." : "Create"}
               </Button>
             </div>
           </div>
@@ -990,12 +1099,17 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
               className="mt-1 h-8 w-full rounded-lg border border-zinc-200 px-2.5 font-mono text-sm outline-none focus:border-mauve-400"
             />
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setGrowOpen(false)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setGrowOpen(false)}
+                disabled={growing}
+              >
                 Cancel
               </Button>
-              <Button variant="default" size="sm" onClick={growPartitions}>
-                <Layers size={13} />
-                Apply
+              <Button variant="default" size="sm" onClick={growPartitions} disabled={growing}>
+                {growing ? <Loader2 size={13} className="animate-spin" /> : <Layers size={13} />}
+                {growing ? "Applying..." : "Apply"}
               </Button>
             </div>
           </div>

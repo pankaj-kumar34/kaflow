@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { AlertTriangle, Trash2, X } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, Loader2, Trash2, X } from "lucide-react";
 import { Button } from "./button";
 
 interface ConfirmModalProps {
@@ -9,7 +9,7 @@ interface ConfirmModalProps {
   confirmText?: string;
   cancelText?: string;
   variant?: "danger" | "warning" | "default";
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
 
@@ -23,27 +23,47 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   onConfirm,
   onCancel,
 }) => {
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+
+  const handleConfirm = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }, [onConfirm]);
+
+  const handleCancel = useCallback(() => {
+    if (busyRef.current) return;
+    onCancel();
+  }, [onCancel]);
+
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onCancel();
+        handleCancel();
       } else if (e.key === "Enter") {
         e.preventDefault();
-        onConfirm();
+        handleConfirm();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onConfirm, onCancel]);
+  }, [isOpen, handleConfirm, handleCancel]);
 
   if (!isOpen) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs duration-150 animate-in fade-in"
-      onClick={onCancel}
+      onClick={handleCancel}
     >
       <div
         className="w-full max-w-md transform space-y-4 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl transition-all duration-150 scale-in-95"
@@ -74,8 +94,9 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
           </div>
 
           <button
-            onClick={onCancel}
-            className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-mauve-100 hover:text-zinc-700"
+            onClick={handleCancel}
+            disabled={busy}
+            className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-mauve-100 hover:text-zinc-700 disabled:pointer-events-none disabled:opacity-40"
             title="Close (Esc)"
           >
             <X size={15} />
@@ -87,7 +108,8 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
             type="button"
             variant="outline"
             size="sm"
-            onClick={onCancel}
+            onClick={handleCancel}
+            disabled={busy}
             className="h-9 cursor-pointer border-zinc-200 bg-white px-4 text-xs font-semibold text-zinc-700 hover:bg-mauve-100"
           >
             {cancelText}
@@ -103,10 +125,15 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
                   : "default"
             }
             size="sm"
-            onClick={onConfirm}
+            onClick={handleConfirm}
+            disabled={busy}
             className="h-9 cursor-pointer gap-1.5 px-4 text-xs font-semibold shadow-xs"
           >
-            {variant === "danger" && <Trash2 size={13} />}
+            {busy ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              variant === "danger" && <Trash2 size={13} />
+            )}
             <span>{confirmText}</span>
           </Button>
         </div>
