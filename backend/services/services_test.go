@@ -93,12 +93,19 @@ func TestMetricsFromMetadata_ExcludesInternalTopics(t *testing.T) {
 }
 
 func TestRecordToModel_CapsAndWireFormat(t *testing.T) {
-	// 1. Large UTF-8 payload is capped at maxRecordValueBytes
+	// 1. Large UTF-8 payload is capped at maxRecordValueBytes (512 KB) in list preview
+	assert.Equal(t, 512*1024, maxRecordValueBytes)
 	big := bytes.Repeat([]byte("a"), maxRecordValueBytes+100)
 	recBig := recordToModel(&kgo.Record{Topic: "t", Value: big})
 	assert.True(t, recBig.Truncated)
 	assert.Equal(t, maxRecordValueBytes+100, recBig.Size)
 	assert.Len(t, recBig.Value, maxRecordValueBytes)
+
+	// 1b. Uncapped full-record mode returns the entire UTF-8 payload
+	recFull := recordToModelWithLimits(&kgo.Record{Topic: "t", Value: big}, 0, maxFullBinaryHexBytes)
+	assert.False(t, recFull.Truncated)
+	assert.Equal(t, maxRecordValueBytes+100, recFull.Size)
+	assert.Len(t, recFull.Value, maxRecordValueBytes+100)
 
 	// 2. Confluent wire header (0x00 + big-endian schema ID 42) strips header for JSON
 	wireJson := append([]byte{0x00, 0x00, 0x00, 0x00, 42}, []byte(`{"ok":true}`)...)
@@ -114,6 +121,17 @@ func TestRecordToModel_CapsAndWireFormat(t *testing.T) {
 	assert.True(t, recBin.Binary)
 	assert.Contains(t, recBin.Value, "Base64:")
 	assert.Contains(t, recBin.Value, "Hex:")
+}
+
+func TestMessageService_GetMessageValidation(t *testing.T) {
+	mgr, id := newReadOnlyTestMgr(t)
+	ms := NewMessageService(mgr)
+	_, err := ms.GetMessage(id, "", 0, 0)
+	require.Error(t, err)
+	_, err = ms.GetMessage(id, "t", -1, 0)
+	require.Error(t, err)
+	_, err = ms.GetMessage(id, "t", 0, -1)
+	require.Error(t, err)
 }
 
 func TestFormatAdminErr(t *testing.T) {

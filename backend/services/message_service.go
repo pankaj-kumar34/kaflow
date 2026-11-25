@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	maxRecordValueBytes = 256 * 1024
-	maxRecordKeyBytes   = 16 * 1024
-	maxBinaryHexBytes   = 4096
+	maxRecordValueBytes   = 512 * 1024
+	maxRecordKeyBytes     = 16 * 1024
+	maxBinaryHexBytes     = 4096
+	maxFullBinaryHexBytes = 512 * 1024 // shortcut: caps full-record hex/base64 view to avoid DOM OOM, upgrade to file download if larger binary inspection is needed
 )
 
 // MessageService exposes fetching and producing records on topics to the frontend.
@@ -45,7 +46,7 @@ func NewMessageService(mgr *connection.ConnectionManager) *MessageService {
 }
 
 func truncateUTF8(b []byte, maxBytes int) (string, bool) {
-	if len(b) <= maxBytes {
+	if maxBytes <= 0 || len(b) <= maxBytes {
 		return string(b), false
 	}
 	cut := maxBytes
@@ -55,18 +56,18 @@ func truncateUTF8(b []byte, maxBytes int) (string, bool) {
 	return string(b[:cut]), true
 }
 
-func formatBinaryPayload(b []byte) (string, bool) {
-	truncated := len(b) > maxBinaryHexBytes
+func formatBinaryPayload(b []byte, maxBytes int) (string, bool) {
+	truncated := maxBytes > 0 && len(b) > maxBytes
 	sample := b
 	if truncated {
-		sample = b[:maxBinaryHexBytes]
+		sample = b[:maxBytes]
 	}
 	b64 := base64.StdEncoding.EncodeToString(sample)
 	hexDump := hex.Dump(sample)
 	var out strings.Builder
 	fmt.Fprintf(&out, "Binary payload (%d bytes)\n\nBase64:\n%s\n\nHex:\n%s", len(b), b64, hexDump)
 	if truncated {
-		fmt.Fprintf(&out, "\n… [truncated to first %d bytes]", maxBinaryHexBytes)
+		fmt.Fprintf(&out, "\n… [truncated to first %d bytes]", maxBytes)
 	}
 	return out.String(), truncated
 }
@@ -74,12 +75,20 @@ func formatBinaryPayload(b []byte) (string, bool) {
 // recordToModel converts a franz-go record to the frontend model, capping large payloads
 // and detecting Confluent wire-format schema headers / binary payloads.
 func recordToModel(rec *kgo.Record) models.MessageRecord {
+	return recordToModelWithLimits(rec, maxRecordValueBytes, maxBinaryHexBytes)
+}
+
+func recordToModelWithLimits(rec *kgo.Record, maxValBytes, maxBinBytes int) models.MessageRecord {
 	headers := make([]models.MessageHeader, 0, len(rec.Headers))
 	for _, h := range rec.Headers {
 		headers = append(headers, models.MessageHeader{Key: h.Key, Value: string(h.Value)})
 	}
 
-	keyStr, _ := truncateUTF8(rec.Key, maxRecordKeyBytes)
+	keyLimit := maxRecordKeyBytes
+	if maxValBytes <= 0 {
+		keyLimit = 0
+	}
+	keyStr, _ := truncateUTF8(rec.Key, keyLimit)
 	raw := rec.Value
 	totalSize := len(raw)
 
@@ -97,9 +106,9 @@ func recordToModel(rec *kgo.Record) models.MessageRecord {
 	var truncated, isBinary bool
 	if len(payload) > 0 && !utf8.Valid(payload) {
 		isBinary = true
-		valStr, truncated = formatBinaryPayload(payload)
+		valStr, truncated = formatBinaryPayload(payload, maxBinBytes)
 	} else {
-		valStr, truncated = truncateUTF8(payload, maxRecordValueBytes)
+		valStr, truncated = truncateUTF8(payload, maxValBytes)
 	}
 
 	return models.MessageRecord{
@@ -329,7 +338,10 @@ func (s *MessageService) FetchMessages(connId string, topic string, partition in
 			result.Messages = append(result.Messages, recordToModel(rec))
 		})
 		if fetchErr != nil {
-			if len(result.Messages) == 0 && !errors.Is(fetchErr, context.DeadlineExceeded) {
+			if len(result.Messages) == 0 {
+				if errors.Is(fetchErr, context.DeadlineExceeded) {
+					return nil, fmt.Errorf("timed out waiting for records from %s (broker unreachable or offsets contain only compacted/control records)", topic)
+				}
 				return nil, fetchErr
 			}
 			break
@@ -352,6 +364,62 @@ func (s *MessageService) FetchMessages(connId string, topic string, partition in
 	})
 
 	return result, nil
+}
+
+// GetMessage fetches a single record at (topic, partition, offset) without list preview truncation.
+func (s *MessageService) GetMessage(connId string, topic string, partition int32, offset int64) (*models.MessageRecord, error) {
+	if topic == "" || partition < 0 || offset < 0 {
+		return nil, fmt.Errorf("valid topic, partition, and offset are required")
+	}
+	mc, err := s.mgr.GetClient(connId)
+	if err != nil {
+		return nil, err
+	}
+
+	assignment := map[string]map[int32]kgo.Offset{
+		topic: {partition: kgo.NewOffset().At(offset)},
+	}
+
+	s.fetchMu.Lock()
+	mc.Client.AddConsumePartitions(assignment)
+	defer func() {
+		mc.Client.RemoveConsumePartitions(partitionsOf(assignment))
+		s.fetchMu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	for {
+		fetches := mc.Client.PollRecords(ctx, 1)
+		if fetches.Empty() {
+			break
+		}
+		var fetchErr error
+		fetches.EachError(func(_ string, _ int32, err error) {
+			fetchErr = err
+		})
+		var found *models.MessageRecord
+		var passed bool
+		fetches.EachRecord(func(rec *kgo.Record) {
+			if rec.Offset == offset {
+				m := recordToModelWithLimits(rec, 0, maxFullBinaryHexBytes)
+				found = &m
+			} else if rec.Offset > offset {
+				passed = true
+			}
+		})
+		if found != nil {
+			return found, nil
+		}
+		if passed {
+			return nil, fmt.Errorf("record at partition %d offset %d no longer exists (compacted or expired)", partition, offset)
+		}
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+	}
+	return nil, fmt.Errorf("record at partition %d offset %d not found", partition, offset)
 }
 
 // tailAssignmentAllPartitions computes per-partition start offsets so low-offset partitions are not skipped.

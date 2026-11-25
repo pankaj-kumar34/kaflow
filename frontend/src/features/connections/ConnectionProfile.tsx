@@ -130,7 +130,11 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
           errStr.includes("connection reset by peer") ||
           errStr.includes("broken pipe") ||
           errStr.includes("HTTP/1.1 400 Bad Request") ||
-          errStr.includes("unable to decode"));
+          errStr.includes("unable to decode") ||
+          errStr.includes("connection timed out") ||
+          errStr.includes("deadline exceeded") ||
+          errStr.includes("i/o timeout") ||
+          errStr.includes("Broker could not be reached"));
 
       setTestResult({
         success: false,
@@ -406,12 +410,12 @@ export const ConnectionProfile: React.FC<ConnectionProfileProps> = ({
                 </div>
               </div>
 
-              {testResult.isHttpTlsError && (
+              {testResult.isHttpTlsError && !form.tls.enabled && (
                 <div className="mt-2 flex flex-col justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center">
                   <div className="text-xs leading-relaxed text-amber-900">
-                    <strong>TLS Resolution:</strong> This cloud endpoint
-                    requires TLS/SSL encryption. Click to automatically enable
-                    TLS and re-test:
+                    <strong>TLS Resolution:</strong> This endpoint may require
+                    TLS/SSL encryption. Click to automatically enable TLS and
+                    re-test:
                   </div>
                   <Button
                     type="button"

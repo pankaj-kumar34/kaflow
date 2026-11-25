@@ -18,6 +18,7 @@ import {
   X,
   Copy,
   Download,
+  AlertCircle,
 } from "lucide-react";
 import { Events } from "@wailsio/runtime";
 import type {
@@ -67,15 +68,61 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
   const [msgFilter, setMsgFilter] = useState("");
   const [copiedMsgKey, setCopiedMsgKey] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [selectedPartition, setSelectedPartition] = useState<number>(-1);
   const [detailMessage, setDetailMessage] = useState<MessageRecord | null>(
     null,
   );
+  const [loadingFullMessage, setLoadingFullMessage] = useState(false);
   const [detailSchema, setDetailSchema] = useState<SchemaInfo | null>(null);
   const [oldestFetched, setOldestFetched] = useState<number | null>(null);
+  const detailSeqRef = useRef(0);
+
+  const openDetailMessage = useCallback(
+    (m: MessageRecord) => {
+      const seq = ++detailSeqRef.current;
+      setDetailSchema(null);
+      setDetailMessage(m);
+      if (!m.truncated || !m.topic) {
+        setLoadingFullMessage(false);
+        return;
+      }
+      setLoadingFullMessage(true);
+      MessageService.GetMessage(connId, m.topic, m.partition, m.offset)
+        .then((full) => {
+          if (detailSeqRef.current !== seq || !full) return;
+          setDetailMessage(full);
+          setMessages((prev) =>
+            prev.map((item) =>
+              item.topic === full.topic &&
+              item.partition === full.partition &&
+              item.offset === full.offset
+                ? full
+                : item,
+            ),
+          );
+        })
+        .catch((err) => {
+          if (detailSeqRef.current !== seq) return;
+          toast.error("Could not load full message", getErrorMessage(err));
+        })
+        .finally(() => {
+          if (detailSeqRef.current === seq) {
+            setLoadingFullMessage(false);
+          }
+        });
+    },
+    [connId, toast],
+  );
+
+  const closeDetailMessage = useCallback(() => {
+    detailSeqRef.current += 1;
+    setLoadingFullMessage(false);
+    setDetailSchema(null);
+    setDetailMessage(null);
+  }, []);
 
   useEffect(() => {
-    setDetailSchema(null);
     const sid = detailMessage?.schemaId;
     if (!sid) return;
     let active = true;
@@ -87,11 +134,13 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
     return () => {
       active = false;
     };
-  }, [connId, detailMessage]);
+  }, [connId, detailMessage?.schemaId]);
 
   // Live tail
   const [tailing, setTailing] = useState(false);
+  const [startingTail, setStartingTail] = useState(false);
   const tailCancelRef = useRef<(() => void) | null>(null);
+  const tailSeqRef = useRef(0);
 
   // Produce
   const [produceOpen, setProduceOpen] = useState(false);
@@ -140,6 +189,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
       fetchSeqRef.current += 1;
       setLoadingDetails(true);
       setLoadingMessages(false);
+      setFetchError(null);
       setDetails(null);
       setMessages([]);
       setOldestFetched(null);
@@ -164,6 +214,9 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
   );
 
   const selectTopic = (topic: string) => {
+    if (topic !== selectedTopic && (tailing || startingTail)) {
+      stopTail();
+    }
     setSelectedTopic(topic);
     loadDetails(topic);
   };
@@ -172,6 +225,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
     async (topic: string, partition: number, before?: number, pageLimit = MESSAGES_PAGE) => {
       const seq = ++fetchSeqRef.current;
       setLoadingMessages(true);
+      setFetchError(null);
       try {
         const from = before ?? -1;
         const result: FetchResult | null =
@@ -190,7 +244,9 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
         );
       } catch (err) {
         if (seq !== fetchSeqRef.current) return;
-        toast.error("Failed to fetch messages", getErrorMessage(err));
+        const msg = getErrorMessage(err);
+        setFetchError(msg);
+        toast.error("Failed to fetch messages", msg);
       } finally {
         if (seq === fetchSeqRef.current) {
           setLoadingMessages(false);
@@ -212,6 +268,8 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
   }, [selectedTopic, details, selectedPartition]);
 
   const stopTail = useCallback(() => {
+    tailSeqRef.current += 1;
+    setStartingTail(false);
     if (tailCancelRef.current) {
       tailCancelRef.current();
       tailCancelRef.current = null;
@@ -221,10 +279,15 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
   }, [connId]);
 
   const toggleTail = async () => {
+    if (startingTail) return;
     if (tailing || !selectedTopic) {
       stopTail();
       return;
     }
+    const seq = ++tailSeqRef.current;
+    const targetTopic = selectedTopic;
+    const targetPartition = selectedPartition;
+    setStartingTail(true);
     let cancel: (() => void) | null = null;
     try {
       // Register listener before StartTail so early records aren't dropped.
@@ -234,25 +297,37 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
           raw && typeof raw === "object" && "data" in raw
             ? raw.data
             : (raw as MessageRecord | null);
-        if (!payload || payload.topic !== selectedTopic) return;
-        if (selectedPartition >= 0 && payload.partition !== selectedPartition)
+        if (!payload || payload.topic !== targetTopic) return;
+        if (targetPartition >= 0 && payload.partition !== targetPartition)
           return;
         setMessages((prev) => {
           const next = [payload, ...prev];
           return next.length > 1000 ? next.slice(0, 1000) : next;
         });
       });
-      await TailService.StartTail(connId, selectedTopic, selectedPartition, true);
+      await TailService.StartTail(connId, targetTopic, targetPartition, true);
+      if (seq !== tailSeqRef.current) {
+        cancel();
+        TailService.StopTail(connId).catch(() => {});
+        return;
+      }
       tailCancelRef.current = cancel;
       setTailing(true);
     } catch (err) {
       if (cancel) cancel();
-      toast.error("Failed to start tail", getErrorMessage(err));
+      if (seq === tailSeqRef.current) {
+        toast.error("Failed to start tail", getErrorMessage(err));
+      }
+    } finally {
+      if (seq === tailSeqRef.current) {
+        setStartingTail(false);
+      }
     }
   };
 
   useEffect(() => {
     return () => {
+      tailSeqRef.current += 1;
       if (tailCancelRef.current) tailCancelRef.current();
       TailService.StopTail(connId).catch(() => {});
     };
@@ -516,14 +591,16 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
                   variant="outline"
                   size="sm"
                   onClick={toggleTail}
-                  disabled={loadingDetails}
+                  disabled={loadingDetails || startingTail}
                 >
-                  {tailing ? (
+                  {startingTail ? (
+                    <Loader2 size={13} className="animate-spin text-mauve-600" />
+                  ) : tailing ? (
                     <CircleStop size={13} className="text-red-500" />
                   ) : (
                     <Play size={13} className="text-mauve-600" />
                   )}
-                  {tailing ? "Stop tail" : "Live tail"}
+                  {startingTail ? "Starting…" : tailing ? "Stop tail" : "Live tail"}
                 </Button>
                 {!readOnly && (
                   <>
@@ -744,7 +821,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
                     value={selectedPartition}
                     onChange={(e) => setSelectedPartition(Number(e.target.value))}
                     className="h-7 cursor-pointer rounded-lg border border-zinc-200 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-mauve-400"
-                    disabled={tailing}
+                    disabled={tailing || startingTail}
                   >
                     <option value={-1}>All partitions</option>
                     {(details?.partitionDetails ?? []).map((p) => (
@@ -757,7 +834,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
                     variant="outline"
                     size="sm"
                     disabled={(() => {
-                      if (loadingMessages || tailing || oldestFetched === null) return true;
+                      if (loadingMessages || tailing || startingTail || oldestFetched === null) return true;
                       const parts = details?.partitionDetails ?? [];
                       if (selectedPartition < 0 && parts.length > 1) return true;
                       const targetPart =
@@ -797,6 +874,29 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
                   </Button>
                 </div>
               </div>
+              {fetchError && (
+                <div className="flex items-center justify-between gap-3 border-b border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-800">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <AlertCircle size={14} className="shrink-0 text-red-600" />
+                    <span className="min-w-0 font-mono wrap-break-word">
+                      {fetchError}
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      selectedTopic &&
+                      fetchMessages(selectedTopic, selectedPartition)
+                    }
+                    disabled={loadingMessages}
+                    className="h-7 shrink-0 border-red-200 bg-white text-red-700 hover:bg-red-100"
+                  >
+                    <RefreshCw size={12} />
+                    Retry
+                  </Button>
+                </div>
+              )}
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {visibleMessages.length === 0 ? (
                   <div className="flex size-full flex-col items-center justify-center gap-2 px-4 text-center">
@@ -824,13 +924,13 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
                     return (
                       <div
                         key={rowKey}
-                        onClick={() => setDetailMessage(m)}
+                        onClick={() => openDetailMessage(m)}
                         role="button"
                         tabIndex={0}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            setDetailMessage(m);
+                            openDetailMessage(m);
                           }
                         }}
                         className="group flex w-full cursor-pointer items-center gap-3 border-b border-zinc-50 px-4 py-2 text-left transition-colors last:border-0 hover:bg-mauve-50/50"
@@ -845,10 +945,11 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
                           {fmtTime(m.timestamp)}
                         </span>
                         <span className="w-32 shrink-0 truncate font-mono text-xs font-semibold text-mauve-700">
-                          {m.key || "∅"}
+                          {(m.key || "∅").slice(0, 200)}
                         </span>
                         <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-600">
-                          {m.value}
+                          {/* Cap single-line DOM text so WKWebView does not overflow layout width on large payloads */}
+                          {(m.value ?? "").slice(0, 500)}
                         </span>
                         {m.schemaId ? (
                           <span className="shrink-0 rounded bg-mauve-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-mauve-700">
@@ -893,7 +994,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
       {/* Message Detail Modal */}
       <ValueDetailModal
         isOpen={detailMessage !== null}
-        onClose={() => setDetailMessage(null)}
+        onClose={closeDetailMessage}
         title={`Record · p${detailMessage?.partition} #${detailMessage?.offset}`}
         subtitle={[
           `Key: ${detailMessage?.key || "∅"}`,
@@ -901,9 +1002,11 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
           detailMessage?.schemaId
             ? `Schema #${detailMessage.schemaId}${detailSchema ? ` (${detailSchema.schemaType})` : ""}`
             : null,
-          detailMessage?.truncated && detailMessage?.size
-            ? `Truncated (${Math.round(detailMessage.size / 1024)} KB total)`
-            : null,
+          loadingFullMessage
+            ? "Loading full message…"
+            : detailMessage?.truncated && detailMessage?.size
+              ? `Truncated (${Math.round(detailMessage.size / 1024)} KB total)`
+              : null,
         ]
           .filter(Boolean)
           .join(" · ")}
@@ -1055,7 +1158,7 @@ export const TopicExplorer: React.FC<TopicExplorerProps> = ({
                 )}
               </div>
               {createError && (
-                <p className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 font-mono text-xs text-red-700 break-words">
+                <p className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 font-mono text-xs wrap-break-word text-red-700">
                   {createError}
                 </p>
               )}

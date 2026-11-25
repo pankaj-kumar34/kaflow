@@ -4,6 +4,7 @@ import React, {
   useState,
   useCallback,
   useEffect,
+  useMemo,
 } from "react";
 import { AlertCircle, CheckCircle, Info, AlertTriangle, X } from "lucide-react";
 
@@ -112,10 +113,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     [toast],
   );
 
+  const value = useMemo(
+    () => ({ toast, error, success, warning, info, dismiss }),
+    [toast, error, success, warning, info, dismiss],
+  );
+
   return (
-    <ToastContext.Provider
-      value={{ toast, error, success, warning, info, dismiss }}
-    >
+    <ToastContext.Provider value={value}>
       {children}
       <div
         aria-live="polite"
